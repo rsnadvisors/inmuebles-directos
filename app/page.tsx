@@ -1,7 +1,7 @@
+import dynamic from "next/dynamic";
 import Link from "next/link";
-import PiuraMap from "./PiuraMap";
 
-const city = "Piura";
+const PiuraMap = dynamic(() => import("./PiuraMap"), { ssr: false });
 
 export default function Home() {
   return <main>
