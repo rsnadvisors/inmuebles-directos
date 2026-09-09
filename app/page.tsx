@@ -67,7 +67,7 @@ export default function Home() {
       const matchesType = type === "Todo" || item.type === type;
       return matchesText && matchesOperation && matchesType;
     });
-    return [...result].sort((a, b) => sort === "priceAsc" ? a.price - b.price : sort === "priceDesc" ? b.price - a.price : a.id - b.id);
+    return [...result].sort((a, b) => sort === "priceAsc" ? a.price - b.price : sort === "priceDesc" ? b.price - a.price : String(a.id).localeCompare(String(b.id)));
   }, [allListings, query, operation, type, sort]);
 
   return (
