@@ -99,7 +99,7 @@ export default function Home() {
             ))}
           </div>
         </aside>
-        <section className="map-panel"><PiuraMap properties={filtered} onSelect={(item: Listing) => setSelected(item)} /><button className="mobile-list-toggle" onClick={() => setMobileList(true)}>☷ {filtered.length} propiedades</button></section>
+        <section className="map-panel"><PiuraMap properties={filtered} onSelect={(item: Listing) => setSelected(item)} /><button className="mobile-list-toggle" aria-label={`Mostrar lista de ${filtered.length} propiedades`} onClick={() => setMobileList(true)}><span aria-hidden="true">☷</span> {filtered.length} propiedades</button></section>
       </section>
 
       {selected && <div className="property-drawer" role="dialog" aria-modal="true" aria-label={`Ficha de ${selected.title}`}><button className="drawer-close" onClick={() => setSelected(null)} aria-label="Cerrar ficha">×</button><div className="drawer-kicker">{selected.operation} · {selected.type}</div><h2>{selected.title}</h2><div className="drawer-price">{money(selected.price)}</div><p>{selected.description}</p><div className="drawer-details"><span>⌖ {selected.zone}</span><span>▧ {selected.area} m²</span></div><div className="drawer-actions"><Link className="contact-btn" href="/contacto">Contactar anunciante</Link><button className="save-btn" onClick={() => alert("Propiedad guardada en favoritos")}>♡ Guardar</button></div></div>}

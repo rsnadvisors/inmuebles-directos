@@ -5,19 +5,20 @@ import { useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
-type Property = { id: number; title: string; operation: string; price: number; coords: [number, number] };
+type Property = { id: number; title: string; operation: string; type?: string; price: number; coords: [number, number] };
 type Props = { properties?: Property[]; onSelect?: (property: Property) => void };
 const piura: [number, number] = [-5.1945, -80.6328];
 
-function iconFor(price: number) {
-  return L.divIcon({ className: "piura-marker", html: `<span>USD ${price.toLocaleString("en-US")}</span>`, iconSize: [104, 34], iconAnchor: [52, 17] });
+function iconFor(property: Property) {
+  const icon = property.type === "Casas" ? "⌂" : property.type === "Departamentos" ? "▥" : "⌖";
+  return L.divIcon({ className: "piura-marker", html: `<span class="marker-icon" aria-hidden="true">${icon}</span><span>USD ${property.price.toLocaleString("en-US")}</span>`, iconAnchor: [0, 38] });
 }
 function LocateButton() {
   const map = useMap();
   return <button className="map-locate" type="button" onClick={() => map.locate({ setView: true, maxZoom: 15 })} aria-label="Centrar mapa en mi ubicación">⌖</button>;
 }
 function LayerToggle({ satellite, onToggle }: { satellite: boolean; onToggle: () => void }) {
-  return <button className="map-layer-toggle" type="button" onClick={onToggle} aria-pressed={satellite} aria-label={satellite ? "Cambiar a mapa" : "Cambiar a satélite"}><span className="layer-thumb" aria-hidden="true" /><strong>{satellite ? "Mapa" : "Satélite"}</strong></button>;
+  return <button className="map-layer-toggle" type="button" onClick={onToggle} aria-pressed={satellite} aria-label={satellite ? "Cambiar a mapa" : "Cambiar a satélite"}><span className={`layer-thumb ${satellite ? "layer-thumb-map" : "layer-thumb-satellite"}`} aria-hidden="true" /><strong>{satellite ? "Mapa" : "Satélite"}</strong></button>;
 }
 
 export default function PiuraMap({ properties = [], onSelect }: Props) {
@@ -26,7 +27,7 @@ export default function PiuraMap({ properties = [], onSelect }: Props) {
   return <div className="leaflet-map" aria-label="Mapa interactivo de propiedades en Piura">
     <MapContainer center={piura} zoom={13} scrollWheelZoom className="leaflet-map-canvas">
       <TileLayer attribution={satellite ? '&copy; Esri' : '&copy; OpenStreetMap contributors'} url={satellite ? "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}" : "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"} />
-      {shown.map((property) => <Marker key={property.id} position={property.coords} icon={iconFor(property.price)} eventHandlers={{ click: () => onSelect?.(property) }}><Popup><strong>{property.title}</strong><br />{property.operation} · USD {property.price.toLocaleString("en-US")}</Popup></Marker>)}
+      {shown.map((property) => <Marker key={property.id} position={property.coords} icon={iconFor(property)} eventHandlers={{ click: () => onSelect?.(property) }}><Popup><strong>{property.title}</strong><br />{property.operation} · USD {property.price.toLocaleString("en-US")}</Popup></Marker>)}
       <LocateButton />
     </MapContainer>
     <div className="map-badge">Mapa de Piura · {shown.length} propiedades</div>
