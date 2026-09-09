@@ -11,7 +11,7 @@ const piura: [number, number] = [-5.1945, -80.6328];
 
 function iconFor(property: Property) {
   const icon = property.type === "Casas" ? "⌂" : property.type === "Departamentos" ? "▥" : "⌖";
-  return L.divIcon({ className: "piura-marker", html: `<span class="marker-icon" aria-hidden="true">${icon}</span><span>USD ${property.price.toLocaleString("en-US")}</span>`, iconAnchor: [0, 38] });
+  return L.divIcon({ className: "piura-marker-host", html: `<div class="piura-marker"><span class="marker-icon" aria-hidden="true">${icon}</span><span>USD ${property.price.toLocaleString("en-US")}</span></div>`, iconSize: [1, 1], iconAnchor: [0, 1] });
 }
 function LocateButton() {
   const map = useMap();
