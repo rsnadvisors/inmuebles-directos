@@ -46,7 +46,7 @@ export default function Home() {
     const load = async () => {
       const { data } = await supabase.from("properties").select("id,title,listing_type,property_type,price,area_total_m2,address,description,lat,lng").eq("status", "published");
       if (!active || !data) return;
-      const remote = data.map((item: any) => ({ id: item.id, title: item.title, operation: item.listing_type === "rent" ? "Alquilar" : "Comprar", type: item.property_type === "house" ? "Casas" : item.property_type === "apartment" ? "Departamentos" : "Terrenos", price: Number(item.price), area: Number(item.area_total_m2 ?? 0), zone: item.address ?? "Piura", description: item.description ?? "", coords: [Number(item.lat), Number(item.lng)] as [number, number] })).filter((item: Listing) => Number.isFinite(item.coords[0]) && Number.isFinite(item.coords[1]));
+      const remote: Listing[] = data.map((item: any): Listing => ({ id: item.id, title: item.title, operation: (item.listing_type === "rent" ? "Alquilar" : "Comprar") as Listing["operation"], type: (item.property_type === "house" ? "Casas" : item.property_type === "apartment" ? "Departamentos" : "Terrenos") as Listing["type"], price: Number(item.price), area: Number(item.area_total_m2 ?? 0), zone: item.address ?? "Piura", description: item.description ?? "", coords: [Number(item.lat), Number(item.lng)] as [number, number] })).filter((item: Listing) => Number.isFinite(item.coords[0]) && Number.isFinite(item.coords[1]));
       if (remote.length) setAllListings(remote);
     };
     load();
