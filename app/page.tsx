@@ -8,7 +8,7 @@ import { supabase } from "./lib/supabase";
 const PiuraMap = dynamic(() => import("./PiuraMap"), { ssr: false });
 
 type Listing = {
-  id: number;
+  id: string | number;
   title: string;
   operation: "Comprar" | "Alquilar";
   type: "Casas" | "Terrenos" | "Departamentos";
@@ -17,13 +17,18 @@ type Listing = {
   zone: string;
   description: string;
   coords: [number, number];
+  images: string[];
+  currency?: string;
+  bedrooms?: number | null;
+  bathrooms?: number | null;
+  parkingSpaces?: number | null;
 };
 
 const listings: Listing[] = [
-  { id: 1, title: "Terreno urbano estratégico", operation: "Comprar", type: "Terrenos", price: 98000, area: 640, zone: "Piura, Piura", description: "Lote urbano con acceso a vías principales y servicios cercanos.", coords: [-5.1945, -80.6328] },
-  { id: 2, title: "Casa familiar en Los Tallanes", operation: "Comprar", type: "Casas", price: 185000, area: 180, zone: "Los Tallanes, Piura", description: "Casa de dos niveles, tres dormitorios y patio interior.", coords: [-5.176, -80.645] },
-  { id: 3, title: "Departamento amoblado céntrico", operation: "Alquilar", type: "Departamentos", price: 1800, area: 82, zone: "Centro de Piura", description: "Departamento luminoso cerca de comercios, bancos y restaurantes.", coords: [-5.195, -80.626] },
-  { id: 4, title: "Terreno residencial en Castilla", operation: "Comprar", type: "Terrenos", price: 72000, area: 420, zone: "Castilla, Piura", description: "Terreno plano ideal para vivienda o inversión.", coords: [-5.205, -80.615] },
+  { id: 1, title: "Terreno urbano estratégico", operation: "Comprar", type: "Terrenos", price: 98000, area: 640, zone: "Piura, Piura", description: "Lote urbano con acceso a vías principales y servicios cercanos.", coords: [-5.1945, -80.6328], images: [] },
+  { id: 2, title: "Casa familiar en Los Tallanes", operation: "Comprar", type: "Casas", price: 185000, area: 180, zone: "Los Tallanes, Piura", description: "Casa de dos niveles, tres dormitorios y patio interior.", coords: [-5.176, -80.645], images: [] },
+  { id: 3, title: "Departamento amoblado céntrico", operation: "Alquilar", type: "Departamentos", price: 1800, area: 82, zone: "Centro de Piura", description: "Departamento luminoso cerca de comercios, bancos y restaurantes.", coords: [-5.195, -80.626], images: [] },
+  { id: 4, title: "Terreno residencial en Castilla", operation: "Comprar", type: "Terrenos", price: 72000, area: 420, zone: "Castilla, Piura", description: "Terreno plano ideal para vivienda o inversión.", coords: [-5.205, -80.615], images: [] },
 ];
 
 const money = (value: number) => value >= 10000
@@ -44,9 +49,9 @@ export default function Home() {
     if (!supabase) return;
     let active = true;
     const load = async () => {
-      const { data } = await supabase.from("properties").select("id,title,listing_type,property_type,price,area_total_m2,address,description,lat,lng").eq("status", "published");
+      const { data } = await supabase.from("properties").select("id,title,listing_type,property_type,price,currency,area_total_m2,address,district,city,description,bedrooms,bathrooms,parking_spaces,lat,lng,property_images(public_url,sort_order,is_cover)").eq("status", "published");
       if (!active || !data) return;
-      const remote: Listing[] = data.map((item: any): Listing => ({ id: item.id, title: item.title, operation: (item.listing_type === "rent" ? "Alquilar" : "Comprar") as Listing["operation"], type: (item.property_type === "house" ? "Casas" : item.property_type === "apartment" ? "Departamentos" : "Terrenos") as Listing["type"], price: Number(item.price), area: Number(item.area_total_m2 ?? 0), zone: item.address ?? "Piura", description: item.description ?? "", coords: [Number(item.lat), Number(item.lng)] as [number, number] })).filter((item: Listing) => Number.isFinite(item.coords[0]) && Number.isFinite(item.coords[1]));
+      const remote: Listing[] = data.map((item: any): Listing => ({ id: item.id, title: item.title, operation: (item.listing_type === "rent" ? "Alquilar" : "Comprar") as Listing["operation"], type: (item.property_type === "house" ? "Casas" : item.property_type === "apartment" ? "Departamentos" : "Terrenos") as Listing["type"], price: Number(item.price), area: Number(item.area_total_m2 ?? 0), zone: [item.address, item.district, item.city].filter(Boolean).join(", ") || "Piura", description: item.description ?? "", currency: item.currency ?? "USD", bedrooms: item.bedrooms, bathrooms: item.bathrooms, parkingSpaces: item.parking_spaces, images: (item.property_images ?? []).sort((a: any, b: any) => (a.sort_order ?? 0) - (b.sort_order ?? 0)).map((image: any) => image.public_url).filter(Boolean), coords: [Number(item.lat), Number(item.lng)] as [number, number] })).filter((item: Listing) => Number.isFinite(item.coords[0]) && Number.isFinite(item.coords[1]));
       if (remote.length) setAllListings(remote);
     };
     load();
@@ -93,7 +98,7 @@ export default function Home() {
           <div className="listing-list">
             {filtered.length === 0 ? <div className="empty-state">No encontramos propiedades con esos filtros.</div> : filtered.map((item) => (
               <article className={`listing-card ${selected?.id === item.id ? "selected" : ""}`} key={item.id} onClick={() => setSelected(item)}>
-                <div className="listing-photo"><span>{item.type === "Terrenos" ? "▧" : "⌂"}</span><b>{item.operation}</b></div>
+                <div className="listing-photo">{item.images[0] ? <img src={item.images[0]} alt="" loading="lazy" /> : <span>{item.type === "Terrenos" ? "▧" : "⌂"}</span>}<b>{item.operation}</b></div>
                 <div className="listing-content"><div className="listing-price">{money(item.price)}</div><h2>{item.title}</h2><p>{item.zone}</p><div className="listing-meta">{item.type} · {item.area} m²</div><button className="detail-link" onClick={(e) => { e.stopPropagation(); setSelected(item); }}>Ver ficha y contacto →</button></div>
               </article>
             ))}
@@ -102,7 +107,7 @@ export default function Home() {
         <section className="map-panel"><PiuraMap properties={filtered} onSelect={(item: Listing) => setSelected(item)} /><button className="mobile-list-toggle" aria-label={`Mostrar lista de ${filtered.length} propiedades`} onClick={() => setMobileList(true)}><span aria-hidden="true">☷</span> {filtered.length} propiedades</button></section>
       </section>
 
-      {selected && <div className="property-drawer" role="dialog" aria-modal="true" aria-label={`Ficha de ${selected.title}`}><button className="drawer-close" onClick={() => setSelected(null)} aria-label="Cerrar ficha">×</button><div className="drawer-kicker">{selected.operation} · {selected.type}</div><h2>{selected.title}</h2><div className="drawer-price">{money(selected.price)}</div><p>{selected.description}</p><div className="drawer-details"><span>⌖ {selected.zone}</span><span>▧ {selected.area} m²</span></div><div className="drawer-actions"><Link className="contact-btn" href="/contacto">Contactar anunciante</Link><button className="save-btn" onClick={() => alert("Propiedad guardada en favoritos")}>♡ Guardar</button></div></div>}
+      {selected && <div className="property-drawer" role="dialog" aria-modal="true" aria-label={`Ficha de ${selected.title}`}><button className="drawer-close" onClick={() => setSelected(null)} aria-label="Cerrar ficha">×</button>{selected.images.length > 0 && <div className="drawer-gallery"><img src={selected.images[0]} alt={selected.title} /><span>1 / {selected.images.length}</span><div>{selected.images.slice(0, 5).map((image) => <img key={image} src={image} alt="" />)}</div></div>}<div className="drawer-kicker">{selected.operation} · {selected.type}</div><h2>{selected.title}</h2><div className="drawer-price">{selected.currency ?? "USD"} {selected.price.toLocaleString("en-US")}</div><p>{selected.description}</p><div className="drawer-details"><span>⌖ {selected.zone}</span>{selected.area > 0 && <span>▧ {selected.area} m²</span>}{selected.bedrooms != null && <span>⌂ {selected.bedrooms} hab.</span>}{selected.bathrooms != null && <span>♧ {selected.bathrooms} baños</span>}{selected.parkingSpaces != null && <span>▣ {selected.parkingSpaces} estacionamientos</span>}</div><div className="drawer-actions"><Link className="contact-btn" href="/contacto">Contactar anunciante</Link><button className="save-btn" onClick={() => alert("Propiedad guardada en favoritos")}>♡ Guardar</button></div></div>}
     </main>
   );
 }
