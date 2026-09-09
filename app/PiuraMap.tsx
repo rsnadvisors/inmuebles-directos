@@ -5,7 +5,7 @@ import { useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
-type Property = { id: number; title: string; operation: string; type?: string; price: number; coords: [number, number] };
+type Property = { id: string | number; title: string; operation: string; type?: string; price: number; coords: [number, number] };
 type Props = { properties?: Property[]; onSelect?: (property: Property) => void };
 const piura: [number, number] = [-5.1945, -80.6328];
 
