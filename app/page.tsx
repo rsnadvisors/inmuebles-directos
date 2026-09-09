@@ -1,8 +1,9 @@
 'use client';
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
+import { supabase } from "./lib/supabase";
 
 const PiuraMap = dynamic(() => import("./PiuraMap"), { ssr: false });
 
@@ -30,6 +31,7 @@ const money = (value: number) => value >= 10000
   : `USD ${value.toLocaleString("en-US")}/mes`;
 
 export default function Home() {
+  const [allListings, setAllListings] = useState<Listing[]>(listings);
   const [query, setQuery] = useState("");
   const [operation, setOperation] = useState("Todo");
   const [type, setType] = useState("Todo");
@@ -37,16 +39,30 @@ export default function Home() {
   const [selected, setSelected] = useState<Listing | null>(null);
   const [mobileList, setMobileList] = useState(false);
 
+  useEffect(() => {
+    if (!supabase) return;
+    let active = true;
+    const load = async () => {
+      const { data } = await supabase.from("properties").select("id,title,operation,property_type,price,area,address,description,latitude,longitude").eq("status", "published");
+      if (!active || !data) return;
+      const remote = data.map((item: any) => ({ id: item.id, title: item.title, operation: item.operation === "Vender" ? "Comprar" : item.operation, type: item.property_type, price: Number(item.price), area: Number(item.area ?? 0), zone: item.address ?? "Piura", description: item.description ?? "", coords: [Number(item.latitude), Number(item.longitude)] as [number, number] })).filter((item: Listing) => Number.isFinite(item.coords[0]) && Number.isFinite(item.coords[1]));
+      if (remote.length) setAllListings(remote);
+    };
+    load();
+    const channel = supabase.channel("properties-map").on("postgres_changes", { event: "*", schema: "public", table: "properties" }, load).subscribe();
+    return () => { active = false; supabase.removeChannel(channel); };
+  }, []);
+
   const filtered = useMemo(() => {
     const term = query.trim().toLowerCase();
-    const result = listings.filter((item) => {
+    const result = allListings.filter((item) => {
       const matchesText = !term || `${item.title} ${item.zone} ${item.type}`.toLowerCase().includes(term);
       const matchesOperation = operation === "Todo" || item.operation === operation;
       const matchesType = type === "Todo" || item.type === type;
       return matchesText && matchesOperation && matchesType;
     });
     return [...result].sort((a, b) => sort === "priceAsc" ? a.price - b.price : sort === "priceDesc" ? b.price - a.price : a.id - b.id);
-  }, [query, operation, type, sort]);
+  }, [allListings, query, operation, type, sort]);
 
   return (
     <main className="geo-app">
@@ -68,7 +84,7 @@ export default function Home() {
 
       <section id="explorar" className="explorer">
         <aside className={`results-panel ${mobileList ? "mobile-open" : ""}`}>
-          <div className="results-head"><div><strong>{filtered.length} propiedades encontradas</strong><span>Total en Piura: {listings.length}</span></div><button className="close-mobile" onClick={() => setMobileList(false)} aria-label="Cerrar listado">×</button></div>
+          <div className="results-head"><div><strong>{filtered.length} propiedades encontradas</strong><span>Total en Piura: {allListings.length}</span></div><button className="close-mobile" onClick={() => setMobileList(false)} aria-label="Cerrar listado">×</button></div>
           <div className="results-tools"><select value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Ordenar propiedades"><option value="recommended">Recomendadas</option><option value="priceAsc">Menor precio</option><option value="priceDesc">Mayor precio</option></select><button className="advanced" onClick={() => { setOperation("Todo"); setType("Todo"); setQuery(""); }}>Limpiar filtros</button></div>
           <div className="listing-list">
             {filtered.length === 0 ? <div className="empty-state">No encontramos propiedades con esos filtros.</div> : filtered.map((item) => (
