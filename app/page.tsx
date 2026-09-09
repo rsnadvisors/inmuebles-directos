@@ -50,7 +50,6 @@ export default function Home() {
 
   return (
     <main className="geo-app">
-      <div className="live-bar">● EN VIVO <span>Geo Propiedades Ecuador: propiedades de Piura ubicadas en un solo mapa</span></div>
       <header className="geo-header">
         <Link className="geo-logo" href="/">Geo<span>Propiedades</span><small>Piura</small></Link>
         <div className="header-search"><span aria-hidden="true">⌕</span><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar propiedad, ciudad o provincia" aria-label="Buscar propiedad, ciudad o provincia" /></div>

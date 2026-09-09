@@ -1,6 +1,7 @@
 'use client';
 
 import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
+import { useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
@@ -15,16 +16,21 @@ function LocateButton() {
   const map = useMap();
   return <button className="map-locate" type="button" onClick={() => map.locate({ setView: true, maxZoom: 15 })} aria-label="Centrar mapa en mi ubicación">⌖</button>;
 }
+function LayerToggle({ satellite, onToggle }: { satellite: boolean; onToggle: () => void }) {
+  return <button className="map-layer-toggle" type="button" onClick={onToggle} aria-pressed={satellite} aria-label={satellite ? "Cambiar a mapa" : "Cambiar a satélite"}><span className="layer-thumb" aria-hidden="true" /><strong>{satellite ? "Mapa" : "Satélite"}</strong></button>;
+}
 
 export default function PiuraMap({ properties = [], onSelect }: Props) {
+  const [satellite, setSatellite] = useState(false);
   const shown = properties.length ? properties : [{ id: 1, title: "Terreno urbano estratégico", operation: "Comprar", price: 98000, coords: piura }];
   return <div className="leaflet-map" aria-label="Mapa interactivo de propiedades en Piura">
     <MapContainer center={piura} zoom={13} scrollWheelZoom className="leaflet-map-canvas">
-      <TileLayer attribution='&copy; OpenStreetMap contributors' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+      <TileLayer attribution={satellite ? '&copy; Esri' : '&copy; OpenStreetMap contributors'} url={satellite ? "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}" : "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"} />
       {shown.map((property) => <Marker key={property.id} position={property.coords} icon={iconFor(property.price)} eventHandlers={{ click: () => onSelect?.(property) }}><Popup><strong>{property.title}</strong><br />{property.operation} · USD {property.price.toLocaleString("en-US")}</Popup></Marker>)}
       <LocateButton />
     </MapContainer>
     <div className="map-badge">Mapa de Piura · {shown.length} propiedades</div>
+    <LayerToggle satellite={satellite} onToggle={() => setSatellite((value) => !value)} />
   </div>;
 }
 
