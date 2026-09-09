@@ -23,7 +23,7 @@ function LayerToggle({ satellite, onToggle }: { satellite: boolean; onToggle: ()
 
 export default function PiuraMap({ properties = [], onSelect }: Props) {
   const [satellite, setSatellite] = useState(false);
-  const shown = properties.length ? properties : [{ id: 1, title: "Terreno urbano estratégico", operation: "Comprar", price: 98000, coords: piura }];
+  const shown = properties;
   return <div className="leaflet-map" aria-label="Mapa interactivo de propiedades en Piura">
     <MapContainer center={piura} zoom={13} scrollWheelZoom className="leaflet-map-canvas">
       <TileLayer attribution={satellite ? '&copy; Esri' : '&copy; OpenStreetMap contributors'} url={satellite ? "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}" : "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"} />
@@ -34,4 +34,5 @@ export default function PiuraMap({ properties = [], onSelect }: Props) {
     <LayerToggle satellite={satellite} onToggle={() => setSatellite((value) => !value)} />
   </div>;
 }
+
 
