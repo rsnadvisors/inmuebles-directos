@@ -38,6 +38,7 @@ export default function Home() {
   const [sort, setSort] = useState("recommended");
   const [selected, setSelected] = useState<Listing | null>(null);
   const [mobileList, setMobileList] = useState(false);
+  const [mobileFilters, setMobileFilters] = useState(false);
 
   useEffect(() => {
     if (!supabase) return;
@@ -69,7 +70,8 @@ export default function Home() {
       <header className="geo-header">
         <Link className="geo-logo" href="/">Geo<span>Propiedades</span><small>Piura</small></Link>
         <div className="header-search"><span aria-hidden="true">⌕</span><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar propiedad, ciudad o provincia" aria-label="Buscar propiedad, ciudad o provincia" /></div>
-        <nav className="geo-nav"><Link href="/publicar">Publicar gratis</Link><a href="#explorar">Explorar mapa</a><Link href="/login">Iniciar sesión</Link></nav>
+        <button className="mobile-filter-toggle" type="button" aria-label="Abrir filtros" aria-expanded={mobileFilters} onClick={() => setMobileFilters((open) => !open)}>☷</button>
+        <nav className="geo-nav"><Link href="/publicar">Publicar gratis</Link><a href="#explorar">Explorar mapa</a><Link href="/login">Iniciar sesión</Link><button className="mobile-menu" type="button" aria-label="Abrir menú">☰</button></nav>
       </header>
 
       <div className="quick-filters" aria-label="Filtros rápidos">
@@ -81,6 +83,8 @@ export default function Home() {
           }}>{filter}</button>
         ))}
       </div>
+
+      {mobileFilters && <section className="mobile-filter-sheet" aria-label="Filtros de propiedades"><div className="mobile-filter-head"><strong>Filtrar propiedades</strong><button type="button" onClick={() => setMobileFilters(false)} aria-label="Cerrar filtros">×</button></div><div className="mobile-filter-options"><strong>Operación</strong>{["Todo", "Comprar", "Alquilar"].map((value) => <button key={value} type="button" className={operation === value ? "active" : ""} onClick={() => { setOperation(value); setType("Todo"); }}>{value}</button>)}<strong>Tipo</strong>{["Todo", "Casas", "Departamentos", "Terrenos"].map((value) => <button key={value} type="button" className={type === value ? "active" : ""} onClick={() => { setType(value); setOperation("Todo"); }}>{value}</button>)}</div></section>}
 
       <section id="explorar" className="explorer">
         <aside className={`results-panel ${mobileList ? "mobile-open" : ""}`}>
