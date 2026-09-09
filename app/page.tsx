@@ -19,6 +19,8 @@ type Listing = {
   coords: [number, number];
   images: string[];
   currency?: string;
+  slug?: string;
+  status?: string;
   bedrooms?: number | null;
   bathrooms?: number | null;
   parkingSpaces?: number | null;
@@ -44,20 +46,23 @@ export default function Home() {
   const [selected, setSelected] = useState<Listing | null>(null);
   const [mobileList, setMobileList] = useState(false);
   const [mobileFilters, setMobileFilters] = useState(false);
+  const [galleryIndex, setGalleryIndex] = useState(0);
 
   useEffect(() => {
     if (!supabase) return;
     let active = true;
     const load = async () => {
-      const { data } = await supabase.from("properties").select("id,title,listing_type,property_type,price,currency,area_total_m2,address,district,city,description,bedrooms,bathrooms,parking_spaces,lat,lng,property_images(public_url,sort_order,is_cover)").eq("status", "published");
+      const { data } = await supabase.from("properties").select("id,title,slug,status,listing_type,property_type,price,currency,area_total_m2,address,district,city,description,bedrooms,bathrooms,parking_spaces,lat,lng,property_images(public_url,sort_order,is_cover)").eq("status", "published");
       if (!active || !data) return;
-      const remote: Listing[] = data.map((item: any): Listing => ({ id: item.id, title: item.title, operation: (item.listing_type === "rent" ? "Alquilar" : "Comprar") as Listing["operation"], type: (item.property_type === "house" ? "Casas" : item.property_type === "apartment" ? "Departamentos" : "Terrenos") as Listing["type"], price: Number(item.price), area: Number(item.area_total_m2 ?? 0), zone: [item.address, item.district, item.city].filter(Boolean).join(", ") || "Piura", description: item.description ?? "", currency: item.currency ?? "USD", bedrooms: item.bedrooms, bathrooms: item.bathrooms, parkingSpaces: item.parking_spaces, images: (item.property_images ?? []).sort((a: any, b: any) => (a.sort_order ?? 0) - (b.sort_order ?? 0)).map((image: any) => image.public_url).filter(Boolean), coords: [Number(item.lat), Number(item.lng)] as [number, number] })).filter((item: Listing) => Number.isFinite(item.coords[0]) && Number.isFinite(item.coords[1]));
+      const remote: Listing[] = data.map((item: any): Listing => ({ id: item.id, title: item.title, slug: item.slug, status: item.status, operation: (item.listing_type === "rent" ? "Alquilar" : "Comprar") as Listing["operation"], type: (item.property_type === "house" ? "Casas" : item.property_type === "apartment" ? "Departamentos" : "Terrenos") as Listing["type"], price: Number(item.price), area: Number(item.area_total_m2 ?? 0), zone: [item.address, item.district, item.city].filter(Boolean).join(", ") || "Piura", description: item.description ?? "", currency: item.currency ?? "USD", bedrooms: item.bedrooms, bathrooms: item.bathrooms, parkingSpaces: item.parking_spaces, images: (item.property_images ?? []).sort((a: any, b: any) => (a.sort_order ?? 0) - (b.sort_order ?? 0)).map((image: any) => image.public_url).filter(Boolean), coords: [Number(item.lat), Number(item.lng)] as [number, number] })).filter((item: Listing) => Number.isFinite(item.coords[0]) && Number.isFinite(item.coords[1]));
       if (remote.length) setAllListings(remote);
     };
     load();
     const channel = supabase.channel("properties-map").on("postgres_changes", { event: "*", schema: "public", table: "properties" }, load).subscribe();
     return () => { active = false; supabase.removeChannel(channel); };
   }, []);
+
+  useEffect(() => { setGalleryIndex(0); }, [selected?.id]);
 
   const filtered = useMemo(() => {
     const term = query.trim().toLowerCase();
@@ -107,8 +112,9 @@ export default function Home() {
         <section className="map-panel"><PiuraMap properties={filtered} onSelect={(item) => setSelected(item as Listing)} /><button className="mobile-list-toggle" aria-label={`Mostrar lista de ${filtered.length} propiedades`} onClick={() => setMobileList(true)}><span aria-hidden="true">☷</span> {filtered.length} propiedades</button></section>
       </section>
 
-      {selected && <div className="property-drawer" role="dialog" aria-modal="true" aria-label={`Ficha de ${selected.title}`}><button className="drawer-close" onClick={() => setSelected(null)} aria-label="Cerrar ficha">×</button>{selected.images.length > 0 && <div className="drawer-gallery"><img src={selected.images[0]} alt={selected.title} /><span>1 / {selected.images.length}</span><div>{selected.images.slice(0, 5).map((image) => <img key={image} src={image} alt="" />)}</div></div>}<div className="drawer-kicker">{selected.operation} · {selected.type}</div><h2>{selected.title}</h2><div className="drawer-price">{selected.currency ?? "USD"} {selected.price.toLocaleString("en-US")}</div><p>{selected.description}</p><div className="drawer-details"><span>⌖ {selected.zone}</span>{selected.area > 0 && <span>▧ {selected.area} m²</span>}{selected.bedrooms != null && <span>⌂ {selected.bedrooms} hab.</span>}{selected.bathrooms != null && <span>♧ {selected.bathrooms} baños</span>}{selected.parkingSpaces != null && <span>▣ {selected.parkingSpaces} estacionamientos</span>}</div><div className="drawer-actions"><Link className="contact-btn" href="/contacto">Contactar anunciante</Link><button className="save-btn" onClick={() => alert("Propiedad guardada en favoritos")}>♡ Guardar</button></div></div>}
+      {selected && <div className="property-drawer" role="dialog" aria-modal="true" aria-label={`Ficha de ${selected.title}`}><button className="drawer-close" onClick={() => setSelected(null)} aria-label="Cerrar ficha">×</button>{selected.images.length > 0 && <div className="drawer-gallery"><img src={selected.images[galleryIndex]} alt={selected.title} /><span>{galleryIndex + 1} / {selected.images.length}</span><div>{selected.images.slice(0, 5).map((image, index) => <button key={image} type="button" aria-label={`Ver imagen ${index + 1}`} onClick={() => setGalleryIndex(index)}><img src={image} alt="" /></button>)}</div></div>}<div className="drawer-kicker">{selected.operation} · {selected.type}{selected.status ? ` · ${selected.status === "published" ? "Publicado" : selected.status}` : ""}</div><h2>{selected.title}</h2><div className="drawer-price">{selected.currency ?? "USD"} {selected.price.toLocaleString("en-US")}</div><p>{selected.description}</p><div className="drawer-details"><span>⌖ {selected.zone}</span>{selected.area > 0 && <span>▧ {selected.area} m²</span>}{selected.bedrooms != null && <span>⌂ {selected.bedrooms} hab.</span>}{selected.bathrooms != null && <span>♧ {selected.bathrooms} baños</span>}{selected.parkingSpaces != null && <span>▣ {selected.parkingSpaces} estacionamientos</span>}</div><div className="drawer-actions"><button className="contact-btn" type="button" onClick={() => setSelected(null)}>Ver mapa</button>{selected.slug && <Link className="save-btn" href={`/${selected.slug}`}>Ficha completa</Link>}<button className="save-btn" onClick={() => alert("Propiedad guardada en favoritos")}>♡ Guardar</button></div></div>}
     </main>
   );
 }
+
 
