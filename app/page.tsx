@@ -99,7 +99,7 @@ export default function Home() {
             {filtered.length === 0 ? <div className="empty-state">No encontramos propiedades con esos filtros.</div> : filtered.map((item) => (
               <article className={`listing-card ${selected?.id === item.id ? "selected" : ""}`} key={item.id} onClick={() => setSelected(item)}>
                 <div className="listing-photo">{item.images[0] ? <img src={item.images[0]} alt="" loading="lazy" /> : <span>{item.type === "Terrenos" ? "▧" : "⌂"}</span>}<b>{item.operation}</b></div>
-                <div className="listing-content"><div className="listing-price">{money(item.price)}</div><h2>{item.title}</h2><p>{item.zone}</p><div className="listing-meta">{item.type} · {item.area} m²</div><button className="detail-link" onClick={(e) => { e.stopPropagation(); setSelected(item); }}>Ver ficha y contacto →</button></div>
+                <div className="listing-content"><div className="listing-price">{money(item.price)}</div><h2>{item.title}</h2><p>{item.zone}</p><div className="listing-meta">{item.type}{item.area > 0 ? ` · ${item.area} m²` : ""}</div><button className="detail-link" onClick={(e) => { e.stopPropagation(); setSelected(item); }}>Ver ficha y contacto →</button></div>
               </article>
             ))}
           </div>
