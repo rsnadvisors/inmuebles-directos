@@ -14,6 +14,7 @@ PR-0 does not certify UX, accessibility, publication, or real map behavior.
 | Map state and interactions need separate browser verification | Mocked map tests do not validate Leaflet, tiles, zoom or mobile behavior. |
 | Drawer/gallery focus management is incomplete | Add keyboard, focus restoration and modal accessibility checks in a functional PR. |
 | Catch-all routes contain generic Ecuador placeholders | Define actual property/login/contact routes before asserting their content. |
+| Dependency audit reports Next.js critical, PostCSS/sharp high | Triage applicability and remediation in a separately authorized security change; see docs/PR0_BASELINE.md. |
 
 The empty-list smoke test uses a search with no matches. An empty fixture is
 available for future tests; the smoke test does not certify the remote-empty

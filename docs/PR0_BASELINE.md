@@ -44,7 +44,8 @@ were not available in inspected build logs; the image digest is a reference,
 not an extracted dependency manifest. Production dependency declarations and
 existing devDependency ranges remain unchanged.
 
-Initial resolution was bounded to the reference deployment timestamp:
+Initial resolution was bounded just before the reference deployment
+(created at `2026-09-09T16:33:20.985Z`), using this cutoff:
 
 ```sh
 npm install --package-lock-only --ignore-scripts --no-audit --no-fund --before=2026-09-09T16:33:04Z
@@ -72,6 +73,26 @@ changed to accommodate testing.
 The lock makes future installations reproducible. It does **not** prove
 byte-identical dependencies or build output to the historical production image.
 In particular, the historical resolved Supabase version remains unverified.
+
+### Dependency audit observed on 2026-09-10
+
+`npm ci` completed successfully but reported 3 affected packages (2 high,
+1 critical). A separate read-only `npm audit --json` identified Next.js 16.2.6
+(critical aggregate severity), PostCSS 8.4.31 (high), and sharp 0.34.5 (high).
+These belong to the existing production dependency tree. The audit does not
+establish exploitability in this application. No audit fix or upgrade was run.
+The required CI validates compilation/tests; it is not a security clearance.
+
+Examples from the registry report:
+- [Next.js Windows-hosted server RCE advisory](https://github.com/advisories/GHSA-p293-qw3h-jr36)
+- [Next.js AVIF image optimization advisory](https://github.com/advisories/GHSA-2xp9-vwfh-vxw4)
+- [PostCSS source map advisory](https://github.com/advisories/GHSA-r28c-9q8g-f849)
+- [sharp/libheif advisory](https://github.com/advisories/GHSA-rgj7-g3m4-5g8c)
+
+Human review must assess these findings before approving a merge that may
+trigger Railway's existing main deployment. Remediation needs a separate
+authorized dependency/security change. npm also warned about sharp's unapproved
+install script; no script-policy override was added.
 
 ## TypeScript and testing
 
