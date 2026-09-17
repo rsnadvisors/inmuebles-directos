@@ -41,6 +41,23 @@ describe("baseline smoke tests (offline)", () => {
     expect(screen.getAllByRole("article")).toHaveLength(3);
   });
 
+  it("unmounts the mobile list button while a drawer is open and restores it after either close action", async () => {
+    await renderHome();
+    for (const closeAction of ["Cerrar detalle de propiedad", "Ver mapa"]) {
+      const toggle = screen.getByRole("button", { name: "Mostrar lista de 3 propiedades" });
+      fireEvent.click(toggle);
+      expect(toggle.isConnected).toBe(true);
+      const card = screen.getByRole("heading", { name: "Casa de prueba" }).closest("article")!;
+      fireEvent.click(within(card).getByRole("button", { name: /Ver ficha y contacto/ }));
+      expect(screen.getByRole("dialog", { name: "Ficha de Casa de prueba" })).toBeTruthy();
+      expect(toggle.isConnected).toBe(false);
+      expect(screen.queryByRole("button", { name: /Mostrar lista de/, hidden: true })).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: closeAction }));
+      expect(screen.queryByRole("dialog")).toBeNull();
+      expect(screen.getByRole("button", { name: "Mostrar lista de 3 propiedades" })).toBeTruthy();
+    }
+  });
+
   it("represents an empty filtered list without a fatal exception", async () => {
     await renderHome();
     fireEvent.change(screen.getByRole("textbox", { name: "Buscar propiedad, ciudad o provincia" }), { target: { value: "no-match-fixture" } });
