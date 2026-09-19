@@ -16,7 +16,7 @@ beforeEach(() => {
   const noNetwork = () => { throw new Error("Network access is forbidden in PR-0 tests"); };
   vi.stubGlobal("fetch", vi.fn(noNetwork));
   vi.stubGlobal("WebSocket", class { constructor() { noNetwork(); } });
-  vi.spyOn(XMLHttpRequest.prototype, "open").mockImplementation(noNetwork);
+  if (typeof XMLHttpRequest !== "undefined") vi.spyOn(XMLHttpRequest.prototype, "open").mockImplementation(noNetwork);
 });
 
 afterEach(() => {
