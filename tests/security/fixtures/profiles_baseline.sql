@@ -40,7 +40,7 @@ as $function$
   select exists (
     select 1
     from public.profiles
-    where id = auth.uid() and role in ('agent', 'owner', 'admin')
+    where id = auth.uid() and role in ('admin', 'agent')
   );
 $function$;
 
@@ -52,7 +52,12 @@ set search_path = public
 as $function$
 begin
   insert into public.profiles (id, full_name, role)
-  values (new.id, new.raw_user_meta_data ->> 'full_name', 'viewer');
+  values (
+    new.id,
+    coalesce(new.raw_user_meta_data ->> 'full_name', split_part(new.email, '@', 1)),
+    'viewer'
+  )
+  on conflict (id) do nothing;
   return new;
 end;
 $function$;

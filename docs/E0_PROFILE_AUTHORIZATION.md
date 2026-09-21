@@ -2,7 +2,7 @@
 
 ## Status and scope
 
-E0 addresses authorization of updates to `public.profiles`. The vulnerability was **reproduced in a faithful local reconstruction based on read-only production metadata**. There is no evidence in this work that a real attacker exploited production.
+E0 addresses authorization of updates to `public.profiles`. The vulnerability was reproduced locally. The security fixture reconstructs the security-relevant profiles authorization baseline from the latest read-only production metadata available during E0 analysis; it is not a complete historical dump or proof of the current production state. There is no evidence in this work that a real attacker exploited production.
 
 This change contains one production migration, a local-only baseline fixture, and a fail-closed regression harness. It does not change application UI, property publication, Storage, property policies, Railway, or production data.
 
@@ -21,7 +21,8 @@ The migration:
 3. grants column-scoped UPDATE only for `full_name`, `phone`, and `avatar_url`;
 4. leaves `id`, `role`, and `created_at` outside the client UPDATE surface;
 5. adds `private.guard_profile_system_fields()` and the `e0_guard_profile_system_fields` trigger as defense in depth;
-6. keeps existing RLS policies and the authorization functions unchanged.
+6. fails closed if `public.profiles` contains columns outside the six-column E0 baseline;
+7. keeps existing RLS policies and the authorization functions unchanged.
 
 Expected client privilege model:
 
@@ -38,7 +39,7 @@ RLS continues to answer **which rows** the current user may see or update. Colum
 
 The trigger rejects changes to `id`, `role`, or `created_at` unless the effective database role is a trusted administrative role (`postgres` or `service_role`). It uses `SECURITY INVOKER` and `search_path = ''`. Its function is not directly executable by client roles.
 
-This layer remains effective if a future change accidentally broadens UPDATE privileges. The security suite proves this by temporarily granting table UPDATE, attempting a role escalation over Auth + PostgREST, observing denial, and restoring then rechecking the hardened grants.
+This layer remains effective if a future change accidentally broadens UPDATE privileges. The security suite proves this by temporarily granting table UPDATE, attempting changes to `role`, `id`, and `created_at` over Auth + PostgREST, observing denial, and restoring then rechecking the hardened grants.
 
 ## Signup and authorization compatibility
 

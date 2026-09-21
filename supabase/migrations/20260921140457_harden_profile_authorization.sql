@@ -6,6 +6,7 @@ begin;
 do $e0_preconditions$
 declare
   missing_columns text[];
+  unexpected_columns text[];
 begin
   if to_regclass('public.profiles') is null then
     raise exception 'E0 precondition failed: public.profiles does not exist';
@@ -32,6 +33,17 @@ begin
 
   if missing_columns is not null then
     raise exception 'E0 precondition failed: profiles columns missing or incompatible: %', missing_columns;
+  end if;
+
+  select array_agg(c.column_name order by c.column_name)
+    into unexpected_columns
+  from information_schema.columns c
+  where c.table_schema = 'public'
+    and c.table_name = 'profiles'
+    and c.column_name not in ('id', 'full_name', 'role', 'phone', 'avatar_url', 'created_at');
+
+  if unexpected_columns is not null then
+    raise exception 'E0 precondition failed: unexpected profiles columns: %', unexpected_columns;
   end if;
 
   if not exists (
@@ -107,5 +119,5 @@ execute function private.guard_profile_system_fields();
 comment on function private.guard_profile_system_fields() is
   'E0 defense in depth: blocks client mutation of profile id, role, and created_at.';
 
-commit;
 notify pgrst, 'reload schema';
+commit;

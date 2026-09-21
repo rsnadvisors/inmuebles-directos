@@ -98,7 +98,7 @@ def admin_sql(sql: str) -> str:
     return result.stdout.strip()
 
 
-def build_fresh_local_database() -> tuple[pathlib.Path, dict[str, str], float]:
+def prepare_test_workdir(extra_migrations: tuple[tuple[str, str], ...] = ()) -> pathlib.Path:
     assert_static_target_safety(REPO_ROOT)
     temp_root = pathlib.Path(tempfile.mkdtemp(prefix="inmuebles-e0-security-"))
     temp_supabase = temp_root / "supabase"
@@ -106,18 +106,98 @@ def build_fresh_local_database() -> tuple[pathlib.Path, dict[str, str], float]:
     migrations_dir.mkdir(parents=True)
     shutil.copy2(CONFIG, temp_supabase / "config.toml")
     shutil.copy2(FIXTURE, migrations_dir / "20260921140000_profiles_baseline_TEST_ONLY.sql")
+    for filename, sql in extra_migrations:
+        (migrations_dir / filename).write_text(sql, encoding="utf-8")
     shutil.copy2(MIGRATIONS[0], migrations_dir / MIGRATIONS[0].name)
     (temp_root / "TEST_ONLY_LOCAL_REBUILD").write_text(
         "This temporary workdir reconstructs the local security fixture only.\n", encoding="utf-8"
     )
     assert_static_target_safety(temp_root)
+    return temp_root
+
+
+def reset_local_database(temp_root: pathlib.Path, *, check: bool = True) -> subprocess.CompletedProcess[str]:
+    return run([
+        "supabase", "db", "reset", "--local", "--no-seed", "--network-id", "e0-local-network", "--workdir", str(temp_root)
+    ], check=check)
+
+
+def final_privilege_vector() -> str:
+    return admin_sql(
+        "select has_table_privilege('authenticated','public.profiles','UPDATE'),"
+        "has_column_privilege('authenticated','public.profiles','id','UPDATE'),"
+        "has_column_privilege('authenticated','public.profiles','role','UPDATE'),"
+        "has_column_privilege('authenticated','public.profiles','created_at','UPDATE'),"
+        "has_column_privilege('authenticated','public.profiles','full_name','UPDATE'),"
+        "has_column_privilege('authenticated','public.profiles','phone','UPDATE'),"
+        "has_column_privilege('authenticated','public.profiles','avatar_url','UPDATE'),"
+        "has_table_privilege('anon','public.profiles','UPDATE'),"
+        "has_column_privilege('anon','public.profiles','id','UPDATE'),"
+        "has_column_privilege('anon','public.profiles','role','UPDATE'),"
+        "has_column_privilege('anon','public.profiles','created_at','UPDATE'),"
+        "has_column_privilege('anon','public.profiles','full_name','UPDATE'),"
+        "has_column_privilege('anon','public.profiles','phone','UPDATE'),"
+        "has_column_privilege('anon','public.profiles','avatar_url','UPDATE'),"
+        "not exists (select 1 from information_schema.table_privileges where table_schema='public' and table_name='profiles' and grantee='PUBLIC' and privilege_type='UPDATE'),"
+        "not exists (select 1 from information_schema.column_privileges where table_schema='public' and table_name='profiles' and grantee='PUBLIC' and privilege_type='UPDATE');"
+    )
+
+
+def verify_unexpected_column_precondition() -> None:
+    temp_root = prepare_test_workdir(((
+        "20260921140200_unexpected_column_TEST_ONLY.sql",
+        "alter table public.profiles add column security_test_extra text;\n",
+    ),))
+    try:
+        started = time.monotonic()
+        result = reset_local_database(temp_root, check=False)
+        elapsed = time.monotonic() - started
+        output = result.stdout + "\n" + result.stderr
+        expected_error = "E0 precondition failed: unexpected profiles columns: {security_test_extra}"
+        if result.returncode == 0 or expected_error not in output:
+            raise AssertionError(
+                f"unexpected-column migration did not fail closed: exit={result.returncode}"
+            )
+        state = admin_sql(
+            "select to_regprocedure('private.guard_profile_system_fields()') is null,"
+            "not exists (select 1 from pg_trigger where tgname='e0_guard_profile_system_fields' and not tgisinternal),"
+            "not exists (select 1 from supabase_migrations.schema_migrations where version='20260921140457'),"
+            "has_table_privilege('authenticated','public.profiles','UPDATE'),"
+            "has_column_privilege('authenticated','public.profiles','role','UPDATE');"
+        )
+        if state != "t|t|t|t|t":
+            raise AssertionError(f"unexpected-column failure left partial E0 state: {state}")
+        print(f"NEGATIVE unexpected_column=PASS partial_mutation=NONE elapsed={elapsed:.2f}s error={expected_error}")
+    finally:
+        shutil.rmtree(temp_root, ignore_errors=True)
+
+
+def verify_column_acl_cleanup() -> None:
+    temp_root = prepare_test_workdir(((
+        "20260921140200_column_acl_TEST_ONLY.sql",
+        "revoke update on table public.profiles from public, anon, authenticated;\n"
+        "grant update (role) on table public.profiles to public, anon, authenticated;\n",
+    ),))
+    try:
+        started = time.monotonic()
+        result = reset_local_database(temp_root)
+        elapsed = time.monotonic() - started
+        expected = "f|f|f|f|t|t|t|f|f|f|f|f|f|f|t|t"
+        actual = final_privilege_vector()
+        if actual != expected:
+            raise AssertionError(f"column ACL cleanup mismatch: {actual}")
+        print(f"ACL_REGRESSION reset_exit={result.returncode} protected_column_grant_removed=PASS elapsed={elapsed:.2f}s")
+    finally:
+        shutil.rmtree(temp_root, ignore_errors=True)
+
+
+def build_fresh_local_database() -> tuple[pathlib.Path, dict[str, str], float]:
+    temp_root = prepare_test_workdir()
     before = local_status(REPO_ROOT)
     print(f"SAFETY api_host={urllib.parse.urlparse(before['api_url']).hostname} "
           f"db_host={urllib.parse.urlparse(before['db_url']).hostname} linked_project_ref=absent")
     started = time.monotonic()
-    result = run([
-        "supabase", "db", "reset", "--local", "--no-seed", "--network-id", "e0-local-network", "--workdir", str(temp_root)
-    ])
+    result = reset_local_database(temp_root)
     elapsed = time.monotonic() - started
     status = local_status(temp_root)
     history = admin_sql(
@@ -159,17 +239,18 @@ class LocalClient:
 
     def signup(self, label: str, metadata: dict | None = None) -> dict:
         nonce = uuid.uuid4().hex
+        email = f"e0-{label}-{nonce}@example.invalid"
         status, body = self.request(
             "POST", "/auth/v1/signup",
             payload={
-                "email": f"e0-{label}-{nonce}@example.invalid",
+                "email": email,
                 "password": f"E0-local-{nonce}!Aa9",
                 "data": metadata or {},
             },
         )
         if status not in (200, 201) or not isinstance(body, dict) or not body.get("access_token"):
             raise AssertionError(f"local signup failed with status {status}")
-        return {"id": body["user"]["id"], "token": body["access_token"]}
+        return {"id": body["user"]["id"], "token": body["access_token"], "email": email}
 
     def profile(self, user: dict) -> dict:
         path = "/rest/v1/profiles?" + urllib.parse.urlencode({"id": f"eq.{user['id']}", "select": "*"})
@@ -222,6 +303,7 @@ class ProfileAuthorizationTests(unittest.TestCase):
         USERS = {
             "a": CLIENT.signup("a", {"full_name": "Viewer A"}),
             "b": CLIENT.signup("b", {"full_name": "Viewer B"}),
+            "fallback": CLIENT.signup("fallback"),
             "metadata": CLIENT.signup("metadata", {"full_name": "Metadata User", "role": "admin"}),
             "agent": CLIENT.signup("agent", {"full_name": "Legitimate Agent"}),
             "admin": CLIENT.signup("admin", {"full_name": "Legitimate Admin"}),
@@ -234,6 +316,10 @@ class ProfileAuthorizationTests(unittest.TestCase):
 
     def test_02_signup_metadata_cannot_assign_admin(self):
         self.assertEqual(CLIENT.profile(USERS["metadata"])["role"], "viewer")
+
+    def test_02a_signup_without_full_name_uses_email_local_part(self):
+        expected = USERS["fallback"]["email"].split("@", 1)[0]
+        self.assertEqual(CLIENT.profile(USERS["fallback"])["full_name"], expected)
 
     def test_03_own_full_name_update_allowed(self):
         status, body = CLIENT.patch(USERS["a"], USERS["a"]["id"], {"full_name": "Viewer A Updated"})
@@ -288,19 +374,33 @@ class ProfileAuthorizationTests(unittest.TestCase):
             admin_sql("grant update on table public.profiles to authenticated;")
             status, _ = CLIENT.patch(USERS["a"], USERS["a"]["id"], {"role": "admin"})
             self.assertGreaterEqual(status, 400, "defensive trigger did not block role mutation")
-            self.assertEqual(CLIENT.profile(USERS["a"])["role"], "viewer")
+            status, _ = CLIENT.patch(USERS["a"], USERS["a"]["id"], {"id": str(uuid.uuid4())})
+            self.assertGreaterEqual(status, 400, "defensive trigger did not block id mutation")
+            status, _ = CLIENT.patch(USERS["a"], USERS["a"]["id"], {"created_at": "2000-01-01T00:00:00Z"})
+            self.assertGreaterEqual(status, 400, "defensive trigger did not block created_at mutation")
+            profile = CLIENT.profile(USERS["a"])
+            self.assertEqual(profile["role"], "viewer")
+            self.assertNotEqual(profile["created_at"], "2000-01-01T00:00:00+00:00")
         finally:
             admin_sql("revoke update on table public.profiles from authenticated; grant update (full_name, phone, avatar_url) on table public.profiles to authenticated;")
-        grants = admin_sql(
-            "select has_table_privilege('authenticated','public.profiles','UPDATE'),"
-            "has_column_privilege('authenticated','public.profiles','role','UPDATE'),"
-            "has_column_privilege('authenticated','public.profiles','created_at','UPDATE'),"
-            "has_column_privilege('authenticated','public.profiles','full_name','UPDATE'),"
-            "has_column_privilege('authenticated','public.profiles','phone','UPDATE'),"
-            "has_column_privilege('authenticated','public.profiles','avatar_url','UPDATE'),"
-            "has_table_privilege('anon','public.profiles','UPDATE');"
+        self.assertEqual(
+            final_privilege_vector(),
+            "f|f|f|f|t|t|t|f|f|f|f|f|f|f|t|t",
         )
-        self.assertEqual(grants, "f|f|f|t|t|t|f")
+
+    def test_16_handle_new_user_conflict_is_idempotent(self):
+        user_id = uuid.UUID(USERS["a"]["id"])
+        before = CLIENT.profile(USERS["a"])
+        try:
+            admin_sql(
+                "create trigger e0_test_handle_existing_profile "
+                "after update of email on auth.users for each row "
+                "execute function private.handle_new_user();"
+            )
+            admin_sql(f"update auth.users set email=email where id='{user_id}';")
+        finally:
+            admin_sql("drop trigger if exists e0_test_handle_existing_profile on auth.users;")
+        self.assertEqual(CLIENT.profile(USERS["a"]), before)
 
 
 def main() -> int:
@@ -313,6 +413,8 @@ def main() -> int:
 
     temp_root: pathlib.Path | None = None
     try:
+        verify_unexpected_column_precondition()
+        verify_column_acl_cleanup()
         temp_root, status, _ = build_fresh_local_database()
         global CLIENT
         CLIENT = LocalClient(status["api_url"], status["anon_key"])
