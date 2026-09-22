@@ -18,10 +18,18 @@ channel.subscribe.mockImplementation(() => channel);
 export const supabase = {
   from: vi.fn((table: string) => {
     if (table !== "properties") throw new Error(`Unexpected table: ${table}`);
+    const filters: Array<[string, unknown]> = [];
+    const response = async (single = false) => {
+      if (responder) return responder();
+      const filtered = rows.filter(row => typeof row === "object" && row !== null && filters.every(([column, value]) => (row as Record<string, unknown>)[column] === value));
+      return { data: single ? structuredClone(filtered[0] ?? null) : structuredClone(filtered), error: null };
+    };
+    const query: Record<string, unknown> = {};
+    query.eq = vi.fn((column: string, value: unknown) => { filters.push([column, value]); return query; });
+    query.maybeSingle = vi.fn(() => response(true));
+    query.then = (resolve: (value: Response) => unknown, reject: (reason: unknown) => unknown) => response().then(resolve, reject);
     return {
-      select: vi.fn(() => ({
-        eq: vi.fn(async () => responder ? responder() : ({ data: structuredClone(rows), error: null })),
-      })),
+      select: vi.fn(() => query),
       insert: forbidden, update: forbidden, delete: forbidden,
     };
   }),

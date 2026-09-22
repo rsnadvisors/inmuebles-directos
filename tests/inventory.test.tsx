@@ -44,13 +44,34 @@ describe("inventory normalization", () => {
   it.each([[0, 0], [-90, -180], [90, 180], [-5.19, -80.63]])("retains valid coordinates %s,%s", (lat, lng) => {
     expect(coordinates(lat, lng)).toEqual([lat, lng]);
   });
-  it("uses neutral location, preserves images without claiming cover support", () => {
+  it("uses neutral location and orders cover images before sort order", () => {
     const item = normalizeListing(row({ address: null, district: " ", city: undefined, property_images: [] }))!;
     expect(item.zone).toBe("Ubicación no especificada");
     expect(item.images).toEqual([]);
-    const images = [{ public_url: "second", sort_order: 2, is_cover: true }, { public_url: "first", sort_order: 0, is_cover: false }];
-    expect(normalizeListing(row({ property_images: images }))!.images).toEqual(["first", "second"]);
+    const images = [{ public_url: "second", alt_text: "Cover alt", sort_order: 2, is_cover: true }, { public_url: "first", sort_order: 0, is_cover: false }];
+    const normalized = normalizeListing(row({ property_images: images }))!;
+    expect(normalized.images).toEqual(["second", "first"]);
+    expect(normalized.imageItems[0]).toEqual({ url: "second", altText: "Cover alt" });
     expect(images[0].public_url).toBe("second");
+  });
+  it("keeps full-detail nulls distinct from legitimate zero values", () => {
+    const item = normalizeListing(row({ area_built_m2: null, maintenance_fee: 0, floors: 0, region: "Piura", country: "Perú", published_at: null }))!;
+    expect(item.builtArea).toBeNull();
+    expect(item.maintenanceFee).toBe(0);
+    expect(item.floors).toBe(0);
+    expect(item.location).toContain("Perú");
+    expect(item.publishedAt).toBeNull();
+  });
+  it.each([
+    ["exact duplicate", { address: "Avenida de prueba 100", district: "Centro", city: "Piura", region: "Piura", country: "Perú" }, "Avenida de prueba 100, Centro, Piura, Perú"],
+    ["case and space duplicate", { address: null, district: null, city: " Piura ", region: "PIURA", country: "Perú" }, "Piura, Perú"],
+    ["duplicate after a distinct district", { address: null, district: "Castilla", city: "Piura", region: "Piura", country: "Perú" }, "Castilla, Piura, Perú"],
+    ["distinct city and region", { address: null, district: null, city: "Sullana", region: "Piura", country: "Perú" }, "Sullana, Piura, Perú"],
+    ["non-consecutive duplicate", { address: "Piura", district: "Centro", city: "Piura", region: null, country: "Perú" }, "Piura, Centro, Piura, Perú"],
+    ["null components", { address: null, district: null, city: "Piura", region: "Piura", country: "Perú" }, "Piura, Perú"],
+    ["all components missing", { address: null, district: undefined, city: " ", region: null, country: undefined }, "Ubicación no especificada"],
+  ])("normalizes %s location", (_label, fields, expected) => {
+    expect(normalizeListing(row(fields))?.location).toBe(expected);
   });
 });
 
