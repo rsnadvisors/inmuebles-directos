@@ -10,7 +10,7 @@ type PageProps = { params: Promise<{ slug: string }> };
 
 function metaDescription(property: Listing): string {
   const context = [property.operation !== "Operación no especificada" ? property.operation : "", property.type !== "Tipo no especificado" ? property.type : "", property.location !== "Ubicación no especificada" ? property.location : ""].filter(Boolean).join(" · ");
-  return [property.title, context, property.description].filter(Boolean).join(". ").slice(0, 160);
+  return [property.title, context, property.description].filter(Boolean).join(". ").replace(/\s+/g, " ").trim().slice(0, 160).trimEnd();
 }
 
 function publishedDate(value: string | null): string | null {

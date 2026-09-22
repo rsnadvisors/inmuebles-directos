@@ -38,6 +38,14 @@ function record(value: unknown): value is RawProperty {
 function text(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
+function locationText(value: unknown): string {
+  return text(value).replace(/\s+/g, " ");
+}
+function formatLocation(values: unknown[]): string {
+  return values.map(locationText).filter(Boolean).filter((value, index, parts) =>
+    index === 0 || value.toLowerCase() !== parts[index - 1].toLowerCase()
+  ).join(", ");
+}
 export function optionalNumber(value: unknown): number | null {
   if (typeof value !== "number" && typeof value !== "string") return null;
   if (typeof value === "string" && !value.trim()) return null;
@@ -72,8 +80,8 @@ export function normalizeListing(value: unknown): Listing | null {
     .sort((a, b) => Number(b.isCover) - Number(a.isCover)
       || (a.sortOrder ?? Number.MAX_SAFE_INTEGER) - (b.sortOrder ?? Number.MAX_SAFE_INTEGER)
       || a.fallback.localeCompare(b.fallback));
-  const zone = [item.address, item.district, item.city].map(text).filter(Boolean).join(", ") || "Ubicación no especificada";
-  const location = [item.address, item.district, item.city, item.region, item.country].map(text).filter(Boolean).join(", ") || "Ubicación no especificada";
+  const zone = formatLocation([item.address, item.district, item.city]) || "Ubicación no especificada";
+  const location = formatLocation([item.address, item.district, item.city, item.region, item.country]) || "Ubicación no especificada";
   return {
     id: item.id, title: text(item.title), operation, type,
     price: optionalNumber(item.price), area: optionalNumber(item.area_total_m2),

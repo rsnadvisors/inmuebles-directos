@@ -62,6 +62,17 @@ describe("inventory normalization", () => {
     expect(item.location).toContain("Perú");
     expect(item.publishedAt).toBeNull();
   });
+  it.each([
+    ["exact duplicate", { address: "Avenida de prueba 100", district: "Centro", city: "Piura", region: "Piura", country: "Perú" }, "Avenida de prueba 100, Centro, Piura, Perú"],
+    ["case and space duplicate", { address: null, district: null, city: " Piura ", region: "PIURA", country: "Perú" }, "Piura, Perú"],
+    ["duplicate after a distinct district", { address: null, district: "Castilla", city: "Piura", region: "Piura", country: "Perú" }, "Castilla, Piura, Perú"],
+    ["distinct city and region", { address: null, district: null, city: "Sullana", region: "Piura", country: "Perú" }, "Sullana, Piura, Perú"],
+    ["non-consecutive duplicate", { address: "Piura", district: "Centro", city: "Piura", region: null, country: "Perú" }, "Piura, Centro, Piura, Perú"],
+    ["null components", { address: null, district: null, city: "Piura", region: "Piura", country: "Perú" }, "Piura, Perú"],
+    ["all components missing", { address: null, district: undefined, city: " ", region: null, country: undefined }, "Ubicación no especificada"],
+  ])("normalizes %s location", (_label, fields, expected) => {
+    expect(normalizeListing(row(fields))?.location).toBe(expected);
+  });
 });
 
 function deferred() {

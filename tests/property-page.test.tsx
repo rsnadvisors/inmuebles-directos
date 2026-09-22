@@ -21,6 +21,17 @@ describe("canonical property page", () => {
     expect(metadata.title).toBe("Casa de prueba | Inmuebles Directos");
   });
 
+  it("normalizes geographic duplicates and whitespace in SEO descriptions", async () => {
+    setInventory([{ ...properties[0], city: " Piura ", region: "PIURA", country: "Perú", description: "Amplia casa\n\ncon excelente\tubicación y     buena iluminación." }]);
+    const metadata = await generateMetadata({ params: Promise.resolve({ slug: "fixture-house" }) });
+    const description = "Casa de prueba. Comprar · Casas · Dirección ficticia 100, Distrito de prueba, Piura, Perú. Amplia casa con excelente ubicación y buena iluminación.";
+    expect(metadata.description).toBe(description);
+    expect(metadata.openGraph?.description).toBe(description);
+    expect(description.length).toBeLessThanOrEqual(160);
+    expect(description).not.toMatch(/\s{2,}|\r|\n|Piura, Piura/i);
+    expect(metadata.alternates?.canonical).toBe("/inmueble/fixture-house");
+  });
+
   it("returns notFound for unknown, empty and non-published slugs", async () => {
     setInventory([{ ...properties[0], status: "draft" }]);
     await expect(PropertyPage({ params: Promise.resolve({ slug: "fixture-house" }) })).rejects.toMatchObject({ digest: "NEXT_HTTP_ERROR_FALLBACK;404" });
