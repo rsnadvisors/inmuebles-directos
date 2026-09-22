@@ -25,6 +25,7 @@ describe("baseline smoke tests (offline)", () => {
     const card = screen.getByRole("heading", { name: "Casa de prueba" }).closest("article")!;
     fireEvent.click(within(card).getByRole("button", { name: /Ver ficha y contacto/ }));
     expect(screen.getByRole("dialog", { name: "Ficha de Casa de prueba" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Ficha completa" }).getAttribute("href")).toBe("/inmueble/fixture-house");
     fireEvent.click(screen.getByRole("button", { name: "Ampliar galería" }));
     expect(screen.getByRole("dialog", { name: "Galería de Casa de prueba" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Cerrar galería" }));

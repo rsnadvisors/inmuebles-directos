@@ -1,6 +1,7 @@
 export type Currency = "PEN" | "USD" | null;
 export const operations = ["Comprar", "Alquilar"] as const;
 export const propertyTypes = ["Casas", "Departamentos", "Terrenos", "Oficinas", "Locales comerciales"] as const;
+export type ListingImage = { url: string; altText: string | null };
 export type Listing = {
   id: string | number;
   title: string;
@@ -8,16 +9,22 @@ export type Listing = {
   type: typeof propertyTypes[number] | "Tipo no especificado";
   price: number | null;
   area: number | null;
+  builtArea: number | null;
+  maintenanceFee: number | null;
   zone: string;
   description: string;
   coords: [number, number] | null;
   images: string[];
+  imageItems: ListingImage[];
   currency: Currency;
   slug?: string;
   status?: string;
   bedrooms: number | null;
   bathrooms: number | null;
   parkingSpaces: number | null;
+  floors: number | null;
+  location: string;
+  publishedAt: string | null;
 };
 export type MappableListing = Listing & { coords: [number, number] };
 export function propertyIcon(type: Listing["type"]): string {
@@ -53,17 +60,32 @@ export function normalizeListing(value: unknown): Listing | null {
   const typeMap: Record<string, Listing["type"]> = { house: "Casas", apartment: "Departamentos", land: "Terrenos", office: "Oficinas", commercial: "Locales comerciales" };
   const type = typeof item.property_type === "string" && Object.hasOwn(typeMap, item.property_type)
     ? typeMap[item.property_type] : "Tipo no especificado";
-  const images = Array.isArray(item.property_images) ? item.property_images.filter(record) : [];
+  const images = (Array.isArray(item.property_images) ? item.property_images.filter(record) : [])
+    .map((image, index) => ({
+      url: text(image.public_url),
+      altText: text(image.alt_text) || null,
+      isCover: image.is_cover === true,
+      sortOrder: optionalNumber(image.sort_order),
+      fallback: text(image.id) || `${text(image.public_url)}:${index}`,
+    }))
+    .filter(image => image.url)
+    .sort((a, b) => Number(b.isCover) - Number(a.isCover)
+      || (a.sortOrder ?? Number.MAX_SAFE_INTEGER) - (b.sortOrder ?? Number.MAX_SAFE_INTEGER)
+      || a.fallback.localeCompare(b.fallback));
+  const zone = [item.address, item.district, item.city].map(text).filter(Boolean).join(", ") || "Ubicación no especificada";
+  const location = [item.address, item.district, item.city, item.region, item.country].map(text).filter(Boolean).join(", ") || "Ubicación no especificada";
   return {
     id: item.id, title: text(item.title), operation, type,
     price: optionalNumber(item.price), area: optionalNumber(item.area_total_m2),
+    builtArea: optionalNumber(item.area_built_m2), maintenanceFee: optionalNumber(item.maintenance_fee),
     currency: item.currency === "PEN" || item.currency === "USD" ? item.currency : null,
-    zone: [item.address, item.district, item.city].map(text).filter(Boolean).join(", ") || "Ubicación no especificada",
+    zone, location,
     description: text(item.description), slug: text(item.slug) || undefined, status: text(item.status) || undefined,
     bedrooms: optionalNumber(item.bedrooms), bathrooms: optionalNumber(item.bathrooms), parkingSpaces: optionalNumber(item.parking_spaces),
+    floors: optionalNumber(item.floors), publishedAt: text(item.published_at) || null,
     coords: coordinates(item.lat, item.lng),
-    // Cover precedence remains deferred; preserve the existing sort_order behavior.
-    images: [...images].sort((a, b) => (optionalNumber(a.sort_order) ?? 0) - (optionalNumber(b.sort_order) ?? 0)).map(image => text(image.public_url)).filter(Boolean),
+    imageItems: images.map(({ url, altText }) => ({ url, altText })),
+    images: images.map(image => image.url),
   };
 }
 export function normalizeInventory(data: unknown): Listing[] {

@@ -6,7 +6,7 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
 import { formatPrice, propertyIcon, MappableListing as Property } from "./lib/inventory";
-type Props = { properties?: Property[]; onSelect?: (property: Property) => void; resetViewKey?: number };
+type Props = { properties?: Property[]; onSelect?: (property: Property) => void; resetViewKey?: number; center?: [number, number] };
 const piura: [number, number] = [-5.1945, -80.6328];
 
 function iconFor(property: Property) {
@@ -32,11 +32,11 @@ function ResetViewOnClose({ resetViewKey = 0 }: { resetViewKey?: number }) {
   return null;
 }
 
-export default function PiuraMap({ properties = [], onSelect, resetViewKey }: Props) {
+export default function PiuraMap({ properties = [], onSelect, resetViewKey, center = piura }: Props) {
   const [satellite, setSatellite] = useState(false);
   const shown = properties;
   return <div className="leaflet-map" aria-label="Mapa interactivo de propiedades en Piura">
-    <MapContainer center={piura} zoom={13} scrollWheelZoom className="leaflet-map-canvas">
+    <MapContainer center={center} zoom={13} scrollWheelZoom className="leaflet-map-canvas">
       <TileLayer attribution={satellite ? '&copy; Esri' : '&copy; OpenStreetMap contributors'} url={satellite ? "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}" : "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"} />
       {shown.map((property) => <Marker key={property.id} position={property.coords} icon={iconFor(property)} eventHandlers={{ click: () => onSelect?.(property) }}><Popup><strong>{property.title}</strong><br />{property.operation} · {property.type} · {formatPrice(property.price, property.currency)}</Popup></Marker>)}
       <LocateButton />
