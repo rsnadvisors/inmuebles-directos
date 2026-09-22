@@ -2,6 +2,20 @@ export type Currency = "PEN" | "USD" | null;
 export const operations = ["Comprar", "Alquilar"] as const;
 export const propertyTypes = ["Casas", "Departamentos", "Terrenos", "Oficinas", "Locales comerciales"] as const;
 export type ListingImage = { url: string; altText: string | null };
+export type ComparisonAttribute = {
+  key: "area" | "bedrooms" | "bathrooms" | "parking";
+  icon: string;
+  value: number;
+  label: string;
+  shortLabel: string;
+};
+export type ListingLocation = {
+  address: string;
+  district: string;
+  city: string;
+  region: string;
+  country: string;
+};
 export type Listing = {
   id: string | number;
   title: string;
@@ -23,6 +37,7 @@ export type Listing = {
   bathrooms: number | null;
   parkingSpaces: number | null;
   floors: number | null;
+  locationParts: ListingLocation;
   location: string;
   publishedAt: string | null;
 };
@@ -45,6 +60,38 @@ function formatLocation(values: unknown[]): string {
   return values.map(locationText).filter(Boolean).filter((value, index, parts) =>
     index === 0 || value.toLowerCase() !== parts[index - 1].toLowerCase()
   ).join(", ");
+}
+export function primaryImage(listing: Listing): ListingImage | null {
+  return listing.imageItems[0] ?? null;
+}
+export function compactLocation(listing: Listing): string {
+  const { address, district, city } = listing.locationParts;
+  return formatLocation([district, city]) || address || "Ubicación no especificada";
+}
+export function previewLocation(listing: Listing): string {
+  const { address, district, city } = listing.locationParts;
+  return formatLocation([address, district, city]) || "Ubicación no especificada";
+}
+function comparisonAttribute(key: ComparisonAttribute["key"], value: number | null): ComparisonAttribute | null {
+  if (value === null) return null;
+  if (key === "area") return { key, icon: "▧", value, label: `${value} metros cuadrados`, shortLabel: `${value} m²` };
+  if (key === "bedrooms") return { key, icon: "⌂", value, label: `${value} ${value === 1 ? "habitación" : "habitaciones"}`, shortLabel: `${value} hab.` };
+  if (key === "bathrooms") return { key, icon: "♧", value, label: `${value} ${value === 1 ? "baño" : "baños"}`, shortLabel: `${value} ${value === 1 ? "baño" : "baños"}` };
+  return { key, icon: "▣", value, label: `${value} ${value === 1 ? "estacionamiento" : "estacionamientos"}`, shortLabel: `${value} est.` };
+}
+export function comparisonAttributes(listing: Listing): ComparisonAttribute[] {
+  const keys: ComparisonAttribute["key"][] = listing.type === "Terrenos"
+    ? ["area"]
+    : listing.type === "Oficinas" || listing.type === "Locales comerciales"
+      ? ["area", "bathrooms", "parking"]
+      : ["area", "bedrooms", "bathrooms", "parking"];
+  const values = {
+    area: listing.area,
+    bedrooms: listing.bedrooms,
+    bathrooms: listing.bathrooms,
+    parking: listing.parkingSpaces,
+  };
+  return keys.map(key => comparisonAttribute(key, values[key])).filter((item): item is ComparisonAttribute => item !== null);
 }
 export function optionalNumber(value: unknown): number | null {
   if (typeof value !== "number" && typeof value !== "string") return null;
@@ -80,14 +127,18 @@ export function normalizeListing(value: unknown): Listing | null {
     .sort((a, b) => Number(b.isCover) - Number(a.isCover)
       || (a.sortOrder ?? Number.MAX_SAFE_INTEGER) - (b.sortOrder ?? Number.MAX_SAFE_INTEGER)
       || a.fallback.localeCompare(b.fallback));
-  const zone = formatLocation([item.address, item.district, item.city]) || "Ubicación no especificada";
-  const location = formatLocation([item.address, item.district, item.city, item.region, item.country]) || "Ubicación no especificada";
+  const locationParts = {
+    address: locationText(item.address), district: locationText(item.district), city: locationText(item.city),
+    region: locationText(item.region), country: locationText(item.country),
+  };
+  const zone = formatLocation([locationParts.address, locationParts.district, locationParts.city]) || "Ubicación no especificada";
+  const location = formatLocation([locationParts.address, locationParts.district, locationParts.city, locationParts.region, locationParts.country]) || "Ubicación no especificada";
   return {
     id: item.id, title: text(item.title), operation, type,
     price: optionalNumber(item.price), area: optionalNumber(item.area_total_m2),
     builtArea: optionalNumber(item.area_built_m2), maintenanceFee: optionalNumber(item.maintenance_fee),
     currency: item.currency === "PEN" || item.currency === "USD" ? item.currency : null,
-    zone, location,
+    zone, locationParts, location,
     description: text(item.description), slug: text(item.slug) || undefined, status: text(item.status) || undefined,
     bedrooms: optionalNumber(item.bedrooms), bathrooms: optionalNumber(item.bathrooms), parkingSpaces: optionalNumber(item.parking_spaces),
     floors: optionalNumber(item.floors), publishedAt: text(item.published_at) || null,

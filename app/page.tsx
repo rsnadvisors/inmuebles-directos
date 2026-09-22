@@ -1,13 +1,23 @@
 'use client';
 
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { supabase } from "./lib/supabase";
-import { Listing, comparePrice, formatPrice, isMappable, normalizeInventory, propertyIcon, propertyTypes } from "./lib/inventory";
+import { Listing, compactLocation, comparePrice, comparisonAttributes, formatPrice, isMappable, normalizeInventory, previewLocation, primaryImage, propertyIcon, propertyTypes } from "./lib/inventory";
 
 const PiuraMap = dynamic(() => import("./PiuraMap"), { ssr: false });
+
+function ListingAttributes({ listing, context }: { listing: Listing; context: "card" | "drawer" }) {
+  const attributes = comparisonAttributes(listing);
+  if (attributes.length === 0) return null;
+  return <div className={`${context}-attributes`} aria-label="Características de la propiedad">{attributes.map(attribute => (
+    <span key={attribute.key} className={`property-attribute property-attribute-${attribute.key}`} aria-label={attribute.label}>
+      <span aria-hidden="true">{attribute.icon}</span><span aria-hidden="true">{attribute.shortLabel}</span>
+    </span>
+  ))}</div>;
+}
 
 export default function Home() {
   const [allListings, setAllListings] = useState<Listing[]>([]);
@@ -22,6 +32,26 @@ export default function Home() {
   const [galleryIndex, setGalleryIndex] = useState(0);
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [mapResetKey, setMapResetKey] = useState(0);
+  const drawerCloseRef = useRef<HTMLButtonElement>(null);
+  const drawerTriggerRef = useRef<HTMLButtonElement | null>(null);
+
+  const openDrawer = useCallback((listing: Listing, trigger: HTMLButtonElement | null = null) => {
+    drawerTriggerRef.current = trigger;
+    setSelected(listing);
+  }, []);
+
+  const closeDrawer = useCallback((returnToMap = false) => {
+    const trigger = drawerTriggerRef.current;
+    setSelected(null);
+    if (returnToMap) {
+      setMobileList(false);
+      setMapResetKey((key) => key + 1);
+    }
+    window.setTimeout(() => {
+      if (trigger?.isConnected) trigger.focus();
+      drawerTriggerRef.current = null;
+    }, 0);
+  }, []);
 
   useEffect(() => {
     if (!supabase) { setInventoryState("error"); return; }
@@ -50,6 +80,18 @@ export default function Home() {
   }, []);
 
   useEffect(() => { setGalleryIndex(0); setGalleryOpen(false); }, [selected?.id]);
+
+  useEffect(() => {
+    if (!selected) return;
+    drawerCloseRef.current?.focus();
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      if (galleryOpen) setGalleryOpen(false);
+      else closeDrawer();
+    };
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [selected, galleryOpen, closeDrawer]);
 
   const filtered = useMemo(() => {
     const term = query.trim().toLowerCase();
@@ -89,17 +131,24 @@ export default function Home() {
           <div className="results-tools"><select value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Ordenar propiedades"><option value="recommended">Orden predeterminado</option><option value="priceAsc">Menor precio</option><option value="priceDesc">Mayor precio</option></select><button className="advanced" onClick={() => { setOperation("Todo"); setType("Todo"); setQuery(""); }}>Limpiar filtros</button></div>
           <div className="listing-list">
             {inventoryState !== "success" ? <div className="empty-state" role={inventoryState === "error" ? "alert" : "status"}>{inventoryState === "loading" ? "Cargando propiedades…" : "No pudimos cargar las propiedades en este momento."}</div> : allListings.length === 0 ? <div className="empty-state">No hay propiedades disponibles en este momento.</div> : filtered.length === 0 ? <div className="empty-state">No encontramos propiedades con esos filtros.</div> : filtered.map((item) => (
-              <article className={`listing-card ${selected?.id === item.id ? "selected" : ""}`} key={item.id} onClick={() => setSelected(item)}>
-                <div className="listing-photo">{item.images[0] ? <img src={item.images[0]} alt="" loading="lazy" /> : <span>{propertyIcon(item.type)}</span>}<b>{item.operation}</b></div>
-                <div className="listing-content"><div className="listing-price">{formatPrice(item.price, item.currency)}</div><h2>{item.title}</h2><p>{item.zone}</p><div className="listing-meta">{item.type}{item.area > 0 ? ` · ${item.area} m²` : ""}</div><button className="detail-link" onClick={(e) => { e.stopPropagation(); setSelected(item); }}>Ver ficha y contacto →</button></div>
+              <article className={`listing-card ${selected?.id === item.id ? "selected" : ""}`} key={item.id}>
+                <div className={`listing-photo ${primaryImage(item) ? "" : "listing-photo-empty"}`}>{primaryImage(item) ? <img src={primaryImage(item)!.url} alt="" loading="lazy" /> : <><span aria-hidden="true">{propertyIcon(item.type)}</span><small>Sin fotografía</small></>}<b>{item.operation}</b></div>
+                <div className="listing-content"><div className="listing-price">{formatPrice(item.price, item.currency)}</div><h2>{item.title}</h2><p>{compactLocation(item)}</p><div className="listing-type">{item.type}</div><ListingAttributes listing={item} context="card" /><button className="detail-link" type="button" onClick={(event) => openDrawer(item, event.currentTarget)}>Ver detalles</button></div>
               </article>
             ))}
           </div>
         </aside>
-        <section className="map-panel"><PiuraMap properties={filtered.filter(isMappable)} resetViewKey={mapResetKey} onSelect={(item) => setSelected(item)} />{!selected && <button className="mobile-list-toggle" aria-label={`Mostrar lista de ${filtered.length} propiedades`} onClick={() => setMobileList(true)}><span aria-hidden="true">☷</span> {filtered.length} propiedades</button>}</section>
+        <section className="map-panel"><PiuraMap properties={filtered.filter(isMappable)} resetViewKey={mapResetKey} onSelect={(item) => openDrawer(item)} />{!selected && <button className="mobile-list-toggle" aria-label={`Mostrar lista de ${filtered.length} propiedades`} onClick={() => setMobileList(true)}><span aria-hidden="true">☷</span> {filtered.length} propiedades</button>}</section>
       </section>
 
-      {selected && <div className="property-drawer" role="dialog" aria-modal="true" aria-label={`Ficha de ${selected.title}`}><button className="drawer-close" onClick={() => { setSelected(null); setMobileList(false); setMapResetKey((key) => key + 1); }} aria-label="Cerrar detalle de propiedad">×</button>{selected.images.length > 0 && <div className="drawer-gallery"><button className="drawer-main-image" type="button" onClick={() => setGalleryOpen(true)} aria-label="Ampliar galería"><img src={selected.images[galleryIndex]} alt={selected.title} /><span>{galleryIndex + 1} / {selected.images.length}</span></button><div>{selected.images.slice(0, 5).map((image, index) => <button key={image} type="button" aria-label={`Ver imagen ${index + 1}`} className={galleryIndex === index ? "active" : ""} onClick={() => setGalleryIndex(index)}><img src={image} alt="" /></button>)}</div></div>}<div className="drawer-kicker">{selected.operation} · {selected.type}{selected.status ? ` · ${selected.status === "published" ? "Publicado" : selected.status}` : ""}</div><h2>{selected.title}</h2><div className="drawer-price">{formatPrice(selected.price, selected.currency)}</div><p>{selected.description}</p><div className="drawer-details"><span>⌖ {selected.zone}</span>{selected.area > 0 && <span>▧ {selected.area} m²</span>}{selected.bedrooms != null && <span>⌂ {selected.bedrooms} hab.</span>}{selected.bathrooms != null && <span>♧ {selected.bathrooms} baños</span>}{selected.parkingSpaces != null && <span>▣ {selected.parkingSpaces} estacionamientos</span>}</div><div className="drawer-actions"><button className="contact-btn" type="button" onClick={() => { setSelected(null); setMobileList(false); setMapResetKey((key) => key + 1); }}>Ver mapa</button>{selected.slug && <Link className="save-btn" href={`/inmueble/${selected.slug}`}>Ficha completa</Link>}<button className="save-btn" onClick={() => alert("Propiedad guardada en favoritos")}>♡ Guardar</button></div></div>}
+      {selected && <div className="property-drawer" role="dialog" aria-label={`Ficha de ${selected.title}`}>
+        <button ref={drawerCloseRef} className="drawer-close" type="button" onClick={() => closeDrawer()} aria-label="Cerrar detalle de propiedad">×</button>
+        {selected.images.length > 0 ? <div className="drawer-gallery"><button className="drawer-main-image" type="button" onClick={() => setGalleryOpen(true)} aria-label="Ampliar galería"><img src={selected.images[galleryIndex]} alt={selected.title} /><span>{galleryIndex + 1} / {selected.images.length}</span></button><div>{selected.images.slice(0, 5).map((image, index) => <button key={image} type="button" aria-label={`Ver imagen ${index + 1}`} className={galleryIndex === index ? "active" : ""} onClick={() => setGalleryIndex(index)}><img src={image} alt="" /></button>)}</div></div> : <div className="drawer-media-empty"><span aria-hidden="true">{propertyIcon(selected.type)}</span><strong>Sin fotografías disponibles</strong></div>}
+        <div className="drawer-kicker">{selected.operation} · {selected.type}</div><h2>{selected.title}</h2><div className="drawer-price">{formatPrice(selected.price, selected.currency)}</div>
+        {selected.description && <p className="drawer-description">{selected.description}</p>}
+        <div className="drawer-location"><span aria-hidden="true">⌖</span> {previewLocation(selected)}</div><ListingAttributes listing={selected} context="drawer" />
+        <div className="drawer-actions">{selected.slug && <Link className="drawer-primary-action" href={`/inmueble/${selected.slug}`}>Ficha completa</Link>}{selected.coords && <button className="drawer-secondary-action" type="button" onClick={() => closeDrawer(true)}>Ver mapa</button>}</div>
+      </div>}
       {selected && galleryOpen && <div className="gallery-modal" role="dialog" aria-modal="true" aria-label={`Galería de ${selected.title}`}><button type="button" className="gallery-modal-close" onClick={() => setGalleryOpen(false)} aria-label="Cerrar galería">×</button><button type="button" className="gallery-prev" onClick={() => setGalleryIndex((galleryIndex - 1 + selected.images.length) % selected.images.length)} aria-label="Imagen anterior">‹</button><img src={selected.images[galleryIndex]} alt={selected.title} /><button type="button" className="gallery-next" onClick={() => setGalleryIndex((galleryIndex + 1) % selected.images.length)} aria-label="Imagen siguiente">›</button><span>{galleryIndex + 1} / {selected.images.length}</span></div>}
     </main>
   );
