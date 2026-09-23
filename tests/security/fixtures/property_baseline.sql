@@ -6,13 +6,26 @@ create table public.properties (
   slug text not null unique,
   listing_type text not null check (listing_type in ('sale','rent')),
   property_type text not null check (property_type in ('house','apartment','land','office','commercial')),
-  status text not null default 'draft',
+  status text not null default 'draft' check (status in ('draft','published','reserved','sold','rented','archived')),
   price numeric not null,
   currency text not null default 'PEN',
+  description text,
+  address text,
+  city text,
+  region text,
+  country text not null default 'Peru',
+  area_total_m2 numeric,
+  area_built_m2 numeric,
+  maintenance_fee numeric,
+  bedrooms integer,
+  bathrooms integer,
+  parking_spaces integer,
+  floors integer,
   lat double precision not null,
   lng double precision not null,
   owner_id uuid references public.profiles(id),
   agent_id uuid references public.profiles(id),
+  published_at timestamptz,
   created_at timestamptz not null default now()
 );
 create table public.property_images (
@@ -76,3 +89,12 @@ create policy "agents upload Piura Habitat images" on storage.objects
     bucket_id='property-images' and private.is_agent()
     and (storage.foldername(name))[1]=(select auth.uid())::text
   );
+-- These two policies exist in the reviewed production baseline. They are
+-- intentionally modeled even though the application never uses overwrite.
+create policy "property_images_update_own" on storage.objects
+  for update to authenticated
+  using (bucket_id='property-images' and owner_id=auth.uid()::text)
+  with check (bucket_id='property-images' and owner_id=auth.uid()::text);
+create policy "property_images_delete_own" on storage.objects
+  for delete to authenticated
+  using (bucket_id='property-images' and owner_id=auth.uid()::text);

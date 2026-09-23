@@ -85,8 +85,8 @@ export default function PublishPage() {
         setPropertyType("Casas");
         setPublishedSlug(typeof result.slug === "string" ? result.slug : null);
         setStatus("Propiedad publicada. Puedes verla en Mis propiedades.");
-      } else if (result.ok === false && ["VALIDATION_ERROR", "INVALID_REQUEST", "INVALID_CONTENT_TYPE", "INVALID_ORIGIN", "REQUEST_TOO_LARGE", "PUBLICATION_FAILED"].includes(result.code)) {
-        setStatus(result.code === "PUBLICATION_FAILED" ? "El servicio de publicación no está disponible." : "No se pudo aceptar el formulario. Revisa los datos, las coordenadas y las fotos.");
+      } else if (result.ok === false && ["VALIDATION_ERROR", "INVALID_REQUEST", "INVALID_CONTENT_TYPE", "INVALID_ORIGIN", "REQUEST_TOO_LARGE", "PUBLICATION_FAILED", "UPLOAD_FAILED", "METADATA_FAILED", "FINALIZATION_FAILED"].includes(result.code)) {
+        setStatus(typeof result.message === "string" ? result.message : "No se pudo completar la publicación.");
       } else {
         setUncertain(true);
         setStatus(PARTIAL_MESSAGE);

@@ -25,7 +25,7 @@ def sql(statement: str, *, role: str | None = None, user: str | None = None, suc
     if role:
         statement = (
             "begin; set local role " + role + "; "
-            + ("select set_config('request.jwt.claim.sub','" + user + "',true); " if user else "")
+            + ("set local request.jwt.claim.sub = '" + user + "'; " if user else "")
             + statement + "; rollback;"
         )
     result = local.run([
@@ -78,31 +78,85 @@ def run_checks() -> None:
     for elevated in ("agent", "admin"):
         sql(f"update public.profiles set role='{elevated}' where id='{A}'", role="authenticated", user=A, succeeds=False)
     assert sql(f"select role from public.profiles where id='{A}'") == "viewer"
-    # Owner A can insert for A; cannot assign ownership to B or manage B's row.
+    # The old authenticated REST bypass must fail, including privileged status
+    # spoofing and assigning another user's UUID. A draft remains non-public.
+    for status in ("published", "approved", "reserved", "sold"):
+        sql("insert into public.properties(title,slug,listing_type,property_type,status,price,lat,lng,owner_id) "
+            f"values ('Spoof','spoof-{status}','sale','land','{status}',300,-5,-80,'{A}')",
+            role="authenticated", user=A, succeeds=False)
     sql("insert into public.properties(title,slug,listing_type,property_type,status,price,lat,lng,owner_id) "
-        f"values ('A2','synthetic-a2','sale','land','published',300,-5,-80,'{A}')",
+        f"values ('A2','synthetic-a2','sale','land','draft',300,-5,-80,'{A}')",
         role="authenticated", user=A)
     sql("insert into public.properties(title,slug,listing_type,property_type,status,price,lat,lng,owner_id) "
-        f"values ('B2','synthetic-b2','sale','land','published',300,-5,-80,'{B}')",
+        f"values ('B2','synthetic-b2','sale','land','draft',300,-5,-80,'{B}')",
+        role="authenticated", user=A, succeeds=False)
+    sql("insert into public.properties(title,slug,listing_type,property_type,status,price,lat,lng,owner_id) "
+        f"values ('Draft','synthetic-draft','sale','house','draft',300,-5,-80,'{A}')")
+    assert not sql("select slug from public.properties where slug='synthetic-draft'", role="anon")
+    assert "synthetic-draft" in sql("select slug from public.properties where slug='synthetic-draft'", role="authenticated", user=A)
+    assert not sql("update public.properties set status='published' where slug='synthetic-draft' returning id",
+                   role="authenticated", user=A)
+    sql(f"select public.finalize_own_property_publication(id) from public.properties where slug='synthetic-draft'",
         role="authenticated", user=A, succeeds=False)
     assert PROPERTY_B not in sql(f"update public.properties set title='stolen' where id='{PROPERTY_B}' returning id", role="authenticated", user=A)
     assert sql(f"select title from public.properties where id='{PROPERTY_B}'") == "B"
-    # Metadata and Storage belong only to the synthetic owner/property pair.
+    # Metadata and Storage belong only to an unfinished owner/property pair.
     sql("insert into public.property_images(property_id,storage_path,public_url) "
-        f"values ('{PROPERTY_A}','{A}/{PROPERTY_A}/a.png','a')", role="authenticated", user=A)
+        f"values ('{PROPERTY_A}','{A}/{PROPERTY_A}/a.png','a')", role="authenticated", user=A, succeeds=False)
+    draft_id = sql("select id from public.properties where slug='synthetic-draft'")
+    draft_path = f"{A}/{draft_id}/a.png"
+    sql("insert into public.property_images(property_id,storage_path,public_url) "
+        f"values ('{draft_id}','{draft_path}','http://localhost/storage/v1/object/public/property-images/{draft_path}')",
+        role="authenticated", user=A)
     sql("insert into public.property_images(property_id,storage_path,public_url) "
         f"values ('{PROPERTY_B}','{A}/{PROPERTY_B}/b.png','b')", role="authenticated", user=A, succeeds=False)
     valid = '{"mimetype":"image/png","size":128}'
     for name, metadata, succeeds in (
-        (f"{A}/{PROPERTY_A}/a.png", valid, True),
+        (f"{A}/{PROPERTY_A}/a.png", valid, False),
+        (draft_path, valid, True),
         (f"{A}/{PROPERTY_B}/b.png", valid, False),
         (f"{B}/{PROPERTY_A}/c.png", valid, False),
         (f"{A}/{PROPERTY_A}/d.exe", '{"mimetype":"application/x-msdownload","size":128}', False),
     ):
         sql("insert into storage.objects(bucket_id,name,owner_id,metadata) values "
             f"('property-images','{name}','{A}','{metadata}')", role="authenticated", user=A, succeeds=succeeds)
+    # Cleanup is available only for one's own unfinished draft, not a published
+    # or foreign object's metadata. No Storage overwrite/move policy remains.
+    sql("insert into public.property_images(property_id,storage_path,public_url) values "
+        f"('{draft_id}','{draft_path}','http://localhost/storage/v1/object/public/property-images/{draft_path}'),"
+        f"('{PROPERTY_A}','{A}/{PROPERTY_A}/published.png','http://localhost/published.png'),"
+        f"('{PROPERTY_B}','{B}/{PROPERTY_B}/foreign.png','http://localhost/foreign.png')")
+    sql("insert into storage.objects(bucket_id,name,owner_id,metadata) values "
+        f"('property-images','{draft_path}','{A}','{valid}'),"
+        f"('property-images','{A}/{PROPERTY_A}/published.png','{A}','{valid}'),"
+        f"('property-images','{B}/{PROPERTY_B}/foreign.png','{B}','{valid}')")
+    assert draft_path in sql(f"delete from public.property_images where storage_path='{draft_path}' "
+                             "returning storage_path", role="authenticated", user=A)
+    assert not sql("delete from public.property_images where property_id='" + PROPERTY_A + "' returning id",
+                   role="authenticated", user=A)
+    assert not sql("delete from public.property_images where property_id='" + PROPERTY_B + "' returning id",
+                   role="authenticated", user=A)
+    assert not sql(f"update public.property_images set storage_path='{A}/{draft_id}/changed.png' "
+                   f"where property_id='{draft_id}' returning id", role="authenticated", user=A)
+    assert not sql(f"update public.property_images set property_id='{draft_id}' "
+                   f"where property_id='{PROPERTY_B}' returning id", role="authenticated", user=A)
+    assert draft_path in sql(f"delete from storage.objects where bucket_id='property-images' "
+                             f"and name='{draft_path}' returning name", role="authenticated", user=A)
+    assert not sql(f"delete from storage.objects where bucket_id='property-images' "
+                   f"and name='{A}/{PROPERTY_A}/published.png' returning name", role="authenticated", user=A)
+    assert not sql(f"delete from storage.objects where bucket_id='property-images' "
+                   f"and name='{B}/{PROPERTY_B}/foreign.png' returning name", role="authenticated", user=A)
+    assert not sql(f"update storage.objects set name='{A}/{draft_id}/moved.png' "
+                   f"where bucket_id='property-images' and name='{draft_path}' returning name",
+                   role="authenticated", user=A)
     assert sql("select file_size_limit from storage.buckets where id='property-images'") == "5242880"
-    print("PASS: anonymous bypass closed; public read; E0 role guard; owner isolation; image and Storage policies")
+    # Legacy Storage UPDATE and DELETE policies have been deliberately removed;
+    # cleanup permissions are limited to own draft objects.
+    assert sql("select count(*) from pg_policies where schemaname='storage' and tablename='objects' "
+               "and policyname in ('property_images_update_own','property_images_delete_own')") == "0"
+    assert sql("select count(*) from pg_policies where schemaname='storage' and tablename='objects' "
+               "and cmd='UPDATE' and policyname like 'owners %'") == "0"
+    print("PASS: direct published/status/owner spoof denied; draft hidden; incomplete finalization denied; legacy Storage UPDATE/DELETE removed")
 
 
 def run_auth_publication_checks(root: pathlib.Path) -> None:
@@ -136,20 +190,49 @@ def run_auth_publication_checks(root: pathlib.Path) -> None:
         "title": "Local owner property", "slug": slug, "listing_type": "sale",
         "property_type": "house", "status": "published", "price": 100,
         "currency": "PEN", "lat": -5, "lng": -80, "owner_id": user_id,
+        "description": "Synthetic local listing", "address": "Test address",
+        "city": "Piura", "region": "Piura", "country": "Peru",
     }
     anon_status, _ = client.request("POST", "/rest/v1/properties", payload=payload)
     if anon_status < 400:
         raise AssertionError("anonymous REST publication unexpectedly succeeded")
-    insert_status, _ = client.request("POST", "/rest/v1/properties", token=token, payload=payload)
+    bypass_status, _ = client.request("POST", "/rest/v1/properties", token=token, payload=payload)
+    if bypass_status < 400:
+        raise AssertionError("authenticated direct published REST bypass succeeded")
+    for spoof in ("reserved", "sold", "approved"):
+        spoof_status, _ = client.request("POST", "/rest/v1/properties", token=token,
+                                         payload={**payload, "slug": f"{slug}-{spoof}", "status": spoof})
+        if spoof_status < 400:
+            raise AssertionError(f"authenticated status spoof succeeded: {spoof}")
+    foreign_status, _ = client.request("POST", "/rest/v1/properties", token=token,
+                                       payload={**payload, "slug": f"{slug}-foreign", "status": "draft", "owner_id": B})
+    if foreign_status < 400:
+        raise AssertionError("authenticated owner spoof succeeded")
+    insert_status, _ = client.request("POST", "/rest/v1/properties", token=token,
+                                      payload={**payload, "status": "draft"})
     if insert_status not in (200, 201):
-        raise AssertionError(f"authenticated owner REST publication failed: HTTP {insert_status}")
+        raise AssertionError(f"authenticated owner draft REST insert failed: HTTP {insert_status}")
     query = urllib.parse.urlencode({"slug": f"eq.{slug}", "select": "id,owner_id,status"})
     read_status, rows = client.request("GET", f"/rest/v1/properties?{query}", token=token)
     if read_status != 200 or not isinstance(rows, list) or len(rows) != 1:
-        raise AssertionError("owner cannot read newly published property")
+        raise AssertionError("owner cannot read newly created draft")
     property_id = rows[0]["id"]
-    if rows[0]["owner_id"] != user_id or rows[0]["status"] != "published":
-        raise AssertionError("published property lost its verified owner/status")
+    if rows[0]["owner_id"] != user_id or rows[0]["status"] != "draft":
+        raise AssertionError("draft lost its verified owner/status")
+    public_status, public_rows = client.request("GET", f"/rest/v1/properties?{query}")
+    if public_status != 200 or public_rows != []:
+        raise AssertionError("unfinished draft became publicly visible")
+    premature_status, _ = client.request("POST", "/rest/v1/rpc/finalize_own_property_publication",
+                                         token=token, payload={"p_property_id": property_id})
+    if premature_status < 400:
+        raise AssertionError("draft without completed image pipeline was finalized")
+    update_filter = urllib.parse.urlencode({"id": f"eq.{property_id}"})
+    update_status, update_rows = client.request("PATCH", f"/rest/v1/properties?{update_filter}",
+                                                token=token, payload={"status": "published"})
+    if update_status < 400 and update_rows not in ([], None):
+        raise AssertionError("direct authenticated REST status UPDATE returned a published row")
+    if sql("select status from public.properties where id='" + property_id + "'") != "draft":
+        raise AssertionError("direct status UPDATE bypassed the controlled transition")
 
     # Exercise the real local Storage HTTP path in addition to SQL RLS checks.
     image = bytes.fromhex("89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
@@ -176,10 +259,51 @@ def run_auth_publication_checks(root: pathlib.Path) -> None:
     upload(f"{user_id}/{property_id}/oversize.png", "image/png", allowed=False,
            body=image + b"x" * (5242881 - len(image)))
 
+    path = f"{user_id}/{property_id}/valid.png"
+    metadata_status, _ = client.request("POST", "/rest/v1/property_images", token=token,
+        payload={"property_id": property_id, "storage_path": path,
+                 "public_url": f"{status['api_url']}/storage/v1/object/public/property-images/{path}",
+                 "sort_order": 0, "is_cover": True})
+    if metadata_status not in (200, 201):
+        raise AssertionError(f"local image metadata insert failed: HTTP {metadata_status}")
+    finalize_status, finalized_slug = client.request("POST", "/rest/v1/rpc/finalize_own_property_publication",
+        token=token, payload={"p_property_id": property_id})
+    if finalize_status != 200 or finalized_slug != slug:
+        raise AssertionError(f"controlled finalization failed: HTTP {finalize_status}")
+    public_status, public_rows = client.request("GET", f"/rest/v1/properties?{query}")
+    if public_status != 200 or len(public_rows) != 1 or public_rows[0]["status"] != "published":
+        raise AssertionError("completed listing did not become publicly visible")
+    foreign_finalize, _ = client.request("POST", "/rest/v1/rpc/finalize_own_property_publication",
+        token=token, payload={"p_property_id": PROPERTY_B})
+    if foreign_finalize < 400:
+        raise AssertionError("foreign property finalization was accepted")
+
     logout_status, _ = client.request("POST", "/auth/v1/logout", token=token)
     if logout_status not in (200, 204):
         raise AssertionError(f"local logout failed: HTTP {logout_status}")
-    print("PASS: local Auth signup/login/session/logout; profile; owner-bound REST publication; Storage HTTP upload")
+    print("PASS: local Auth; direct published REST denied; draft hidden; Storage HTTP upload; controlled finalization")
+
+
+def verify_unknown_policy_fails_closed() -> None:
+    root = prepare()
+    try:
+        (root / "supabase" / "migrations" / "20260922180000_unknown_storage_policy_TEST_ONLY.sql").write_text(
+            "create policy security_test_unreviewed_update on storage.objects "
+            "for update to authenticated using (bucket_id='property-images');\n",
+            encoding="utf-8",
+        )
+        result = local.reset_local_database(root, check=False)
+        if result.returncode == 0 or "unreviewed policy" not in (result.stdout + result.stderr):
+            raise AssertionError("unknown Storage UPDATE policy did not fail the master preflight")
+        if sql("select count(*) from pg_policies where schemaname='storage' and tablename='objects' "
+               "and policyname='property_images_update_own'") != "1":
+            raise AssertionError("failed migration partially removed the known legacy Storage policy")
+        if sql("select count(*) from pg_policies where schemaname='public' and tablename='properties' "
+               "and policyname='owners publish own properties'") != "0":
+            raise AssertionError("failed migration partially added owner publication permissions")
+        print("PASS: unknown Storage UPDATE policy fails before any master mutation")
+    finally:
+        shutil.rmtree(root)
 
 
 def main() -> None:
@@ -188,6 +312,7 @@ def main() -> None:
         local.reset_local_database(root)
         run_checks()
         run_auth_publication_checks(root)
+        verify_unknown_policy_fails_closed()
     finally:
         shutil.rmtree(root)
 
