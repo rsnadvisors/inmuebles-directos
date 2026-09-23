@@ -13,7 +13,8 @@ const reply = (body: unknown, status = 200) => ({ ok: status < 400, json: async 
 function ready(confirmed = true) {
   render(<PublishPage />);
   change("Título del anuncio", "Casa de prueba"); change("Descripción", "Descripción de prueba");
-  change("Dirección o sector", "Piura"); change("Precio en USD", "100.5");
+  change("Dirección o sector", "Piura"); change("Región", "Piura"); change("Ciudad o provincia", "Piura"); change("Precio", "100.5");
+  change("Latitud", "-5.19"); change("Longitud", "-80.63");
   pick([photo()]); if (confirmed) confirm();
 }
 beforeEach(() => vi.stubGlobal("fetch", vi.fn().mockResolvedValue(reply({ ok: true, status: "published" }))));
@@ -26,7 +27,7 @@ describe("publication client guards", () => {
     ready(); change(name, "   "); submit(); expect(fetch).not.toHaveBeenCalled();
   });
   it.each(["", "0", "-1", "NaN", "Infinity", "1000000001"])("rejects price %s", value => {
-    ready(); change("Precio en USD", value); submit(); expect(fetch).not.toHaveBeenCalled();
+    ready(); change("Precio", value); submit(); expect(fetch).not.toHaveBeenCalled();
   });
   it.each(["Operación", "Tipo de propiedad"])("rejects tampered enum %s", name => {
     ready(); const select = field(name); const option = document.createElement("option");
@@ -36,7 +37,7 @@ describe("publication client guards", () => {
     ready(false); submit(); expect(fetch).not.toHaveBeenCalled();
     expect(screen.getByRole("status").textContent).toContain("Confirma las coordenadas");
   });
-  it.each(["", "NaN", "Infinity", "-6.1", "-3.9"])("rejects latitude %s", value => {
+  it.each(["", "NaN", "Infinity", "-19.1", "1.1"])("rejects latitude %s", value => {
     ready(); change("Latitud", value); confirm(); submit(); expect(fetch).not.toHaveBeenCalled();
   });
   it("invalidates confirmation after editing either coordinate", () => {
@@ -68,7 +69,7 @@ describe("geolocation confirmation", () => {
   function geo() { const getCurrentPosition = vi.fn(); vi.stubGlobal("navigator", { geolocation: { getCurrentPosition } }); return getCurrentPosition; }
   it("rejects out-of-area geolocation without announcing success", () => {
     ready(); const location = geo(); fireEvent.click(screen.getByRole("button", { name: "Usar mi ubicación actual" }));
-    act(() => location.mock.calls[0][0]({ coords: { latitude: -12, longitude: -77 } }));
+    act(() => location.mock.calls[0][0]({ coords: { latitude: 10, longitude: -77 } }));
     expect(screen.getByRole("status").textContent).toContain("fuera del área");
     submit(); expect(fetch).not.toHaveBeenCalled();
   });
