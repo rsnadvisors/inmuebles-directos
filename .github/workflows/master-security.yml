@@ -25,7 +25,7 @@ jobs:
           docker network create e0-local-network
           mkdir -p "$RUNNER_TEMP/inmuebles-lab/supabase"
           cp supabase/config.toml "$RUNNER_TEMP/inmuebles-lab/supabase/config.toml"
-          npx supabase start --workdir "$RUNNER_TEMP/inmuebles-lab"
+          npx supabase start --network-id e0-local-network --workdir "$RUNNER_TEMP/inmuebles-lab"
       - name: E0 role authorization regression
         run: python3 tests/security/profile_authorization.py --rebuild
       - name: Master ownership and Storage regression
