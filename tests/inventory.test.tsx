@@ -1,9 +1,20 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import Home from "../app/page";
 import { compactLocation, comparisonAttributes, coordinates, formatPrice, normalizeListing, optionalNumber, previewLocation, primaryImage } from "../app/lib/inventory";
 import { properties } from "./fixtures/properties";
 import { refreshInventory, setInventory, setResponse } from "./mocks/supabase";
+
+vi.mock("../app/lib/auth-client", async () => {
+  const { supabase } = await import("./mocks/supabase");
+  return { getBrowserClient: () => ({
+    ...supabase,
+    auth: {
+      getUser: async () => ({ data: { user: null }, error: null }),
+      onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => {} } } }),
+    },
+  }) };
+});
 
 const row = (extra = {}) => ({ ...properties[0], ...extra });
 describe("inventory normalization", () => {

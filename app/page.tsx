@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { supabase } from "./lib/supabase";
+import { getBrowserClient } from "./lib/auth-client";
 import { Listing, compactLocation, comparisonAttributes, filterAndSortListings, formatPrice, isMappable, normalizeInventory, previewLocation, primaryImage, propertyIcon, propertyTypes } from "./lib/inventory";
 import SiteHeader from "./components/SiteHeader";
 
@@ -55,6 +55,7 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    const supabase = getBrowserClient();
     if (!supabase) { setInventoryState("error"); return; }
     let active = true;
     let requestSequence = 0;

@@ -1,8 +1,19 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import Home from "../app/page";
 import PublishPage from "../app/publicar/page";
 import RoutePage from "../app/[...slug]/page";
+
+vi.mock("../app/lib/auth-client", async () => {
+  const { supabase } = await import("./mocks/supabase");
+  return { getBrowserClient: () => ({
+    ...supabase,
+    auth: {
+      getUser: async () => ({ data: { user: null }, error: null }),
+      onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => {} } } }),
+    },
+  }) };
+});
 
 async function renderHome() {
   render(<Home />);
