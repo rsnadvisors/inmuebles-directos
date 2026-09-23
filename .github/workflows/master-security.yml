@@ -18,6 +18,8 @@ jobs:
           node-version-file: .node-version
           cache: npm
       - run: npm ci
+      - name: Expose pinned Supabase CLI to isolated test harness
+        run: echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
       - name: Start synthetic local Supabase only
         run: |
           docker network create e0-local-network
