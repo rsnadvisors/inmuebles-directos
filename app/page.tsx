@@ -5,7 +5,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { supabase } from "./lib/supabase";
-import { Listing, compactLocation, comparePrice, comparisonAttributes, formatPrice, isMappable, normalizeInventory, previewLocation, primaryImage, propertyIcon, propertyTypes } from "./lib/inventory";
+import { Listing, compactLocation, comparisonAttributes, filterAndSortListings, formatPrice, isMappable, normalizeInventory, previewLocation, primaryImage, propertyIcon, propertyTypes } from "./lib/inventory";
+import SiteHeader from "./components/SiteHeader";
 
 const PiuraMap = dynamic(() => import("./PiuraMap"), { ssr: false });
 
@@ -63,7 +64,7 @@ export default function Home() {
       setAllListings([]);
       setSelected(null);
       try {
-        const { data, error } = await supabase.from("properties").select("id,title,slug,status,listing_type,property_type,price,currency,area_total_m2,address,district,city,description,bedrooms,bathrooms,parking_spaces,lat,lng,property_images(id,public_url,alt_text,sort_order,is_cover)").eq("status", "published");
+        const { data, error } = await supabase.from("properties").select("id,title,slug,status,listing_type,property_type,price,currency,area_total_m2,address,district,city,region,country,description,bedrooms,bathrooms,parking_spaces,lat,lng,published_at,property_images(id,public_url,alt_text,sort_order,is_cover)").eq("status", "published");
         if (!active || request !== requestSequence) return;
         if (error) throw error;
         setAllListings(normalizeInventory(data));
@@ -93,42 +94,31 @@ export default function Home() {
     return () => window.removeEventListener("keydown", handleEscape);
   }, [selected, galleryOpen, closeDrawer]);
 
-  const filtered = useMemo(() => {
-    const term = query.trim().toLowerCase();
-    const result = allListings.filter((item) => {
-      const matchesText = !term || `${item.title} ${item.zone} ${item.type}`.toLowerCase().includes(term);
-      const matchesOperation = operation === "Todo" || item.operation === operation;
-      const matchesType = type === "Todo" || item.type === type;
-      return matchesText && matchesOperation && matchesType;
-    });
-    return [...result].sort((a, b) => sort === "priceAsc" ? comparePrice(a, b) : sort === "priceDesc" ? comparePrice(a, b, true) : String(a.id).localeCompare(String(b.id)));
-  }, [allListings, query, operation, type, sort]);
+  const filtered = useMemo(() => filterAndSortListings(allListings, query, operation, type, sort), [allListings, query, operation, type, sort]);
+  useEffect(() => {
+    if (selected && !filtered.some(item => item.id === selected.id)) setSelected(null);
+  }, [filtered, selected]);
 
   return (
     <main className="geo-app">
-      <header className="geo-header">
-        <Link className="geo-logo" href="/">Geo<span>Propiedades</span><small>Piura</small></Link>
-        <div className="header-search"><span aria-hidden="true">⌕</span><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar propiedad, ciudad o provincia" aria-label="Buscar propiedad, ciudad o provincia" /></div>
-        <button className="mobile-filter-toggle" type="button" aria-label="Abrir filtros" aria-expanded={mobileFilters} onClick={() => setMobileFilters((open) => !open)}>☷</button>
-        <nav className="geo-nav"><Link href="/publicar">Publicar gratis</Link><a href="#explorar">Explorar mapa</a><Link href="/login">Iniciar sesión</Link><button className="mobile-menu" type="button" aria-label="Abrir menú">☰</button></nav>
-      </header>
+      <SiteHeader query={query} onQueryChange={setQuery} mobileFilters={mobileFilters} onMobileFiltersChange={setMobileFilters} />
 
       <div className="quick-filters" aria-label="Filtros rápidos">
         {["Todo", "Comprar", "Alquilar", ...propertyTypes].map((filter) => (
-          <button key={filter} className={(operation === filter || type === filter || (filter === "Todo" && operation === "Todo" && type === "Todo")) ? "active" : ""} onClick={() => {
+          <button key={filter} className={(filter === "Todo" ? operation === "Todo" && type === "Todo" : operation === filter || type === filter) ? "active" : ""} onClick={() => {
             if (filter === "Todo") { setOperation("Todo"); setType("Todo"); }
-            else if (filter === "Comprar" || filter === "Alquilar") { setOperation(filter); setType("Todo"); }
-            else { setType(filter); setOperation("Todo"); }
+            else if (filter === "Comprar" || filter === "Alquilar") setOperation(filter);
+            else setType(filter);
           }}>{filter}</button>
         ))}
       </div>
 
-      {mobileFilters && <section className="mobile-filter-sheet" aria-label="Filtros de propiedades"><div className="mobile-filter-head"><strong>Filtrar propiedades</strong><button type="button" onClick={() => setMobileFilters(false)} aria-label="Cerrar filtros">×</button></div><div className="mobile-filter-options"><strong>Operación</strong>{["Todo", "Comprar", "Alquilar"].map((value) => <button key={value} type="button" className={operation === value ? "active" : ""} onClick={() => { setOperation(value); setType("Todo"); }}>{value}</button>)}<strong>Tipo</strong>{["Todo", ...propertyTypes].map((value) => <button key={value} type="button" className={type === value ? "active" : ""} onClick={() => { setType(value); setOperation("Todo"); }}>{value}</button>)}</div></section>}
+      {mobileFilters && <section className="mobile-filter-sheet" aria-label="Filtros de propiedades"><div className="mobile-filter-head"><strong>Filtrar propiedades</strong><button type="button" onClick={() => setMobileFilters(false)} aria-label="Cerrar filtros">×</button></div><div className="mobile-filter-options"><strong>Operación</strong>{["Todo", "Comprar", "Alquilar"].map((value) => <button key={value} type="button" className={operation === value ? "active" : ""} onClick={() => setOperation(value)}>{value}</button>)}<strong>Tipo</strong>{["Todo", ...propertyTypes].map((value) => <button key={value} type="button" className={type === value ? "active" : ""} onClick={() => setType(value)}>{value}</button>)}<button type="button" onClick={() => { setQuery(""); setOperation("Todo"); setType("Todo"); }}>Limpiar filtros</button></div></section>}
 
       <section id="explorar" className="explorer">
         <aside className={`results-panel ${mobileList ? "mobile-open" : ""}`}>
           <div className="results-head"><div><strong>{filtered.length} propiedades encontradas</strong><span>Total de propiedades: {allListings.length}</span></div><button className="close-mobile" onClick={() => setMobileList(false)} aria-label="Cerrar listado">×</button></div>
-          <div className="results-tools"><select value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Ordenar propiedades"><option value="recommended">Orden predeterminado</option><option value="priceAsc">Menor precio</option><option value="priceDesc">Mayor precio</option></select><button className="advanced" onClick={() => { setOperation("Todo"); setType("Todo"); setQuery(""); }}>Limpiar filtros</button></div>
+          <div className="results-tools"><select value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Ordenar propiedades"><option value="recommended">Orden predeterminado</option><option value="recent">Más recientes</option><option value="priceAsc">Menor precio por moneda</option><option value="priceDesc">Mayor precio por moneda</option></select><button className="advanced" onClick={() => { setOperation("Todo"); setType("Todo"); setQuery(""); setSort("recommended"); }}>Limpiar filtros</button></div>
           <div className="listing-list">
             {inventoryState !== "success" ? <div className="empty-state" role={inventoryState === "error" ? "alert" : "status"}>{inventoryState === "loading" ? "Cargando propiedades…" : "No pudimos cargar las propiedades en este momento."}</div> : allListings.length === 0 ? <div className="empty-state">No hay propiedades disponibles en este momento.</div> : filtered.length === 0 ? <div className="empty-state">No encontramos propiedades con esos filtros.</div> : filtered.map((item) => (
               <article className={`listing-card ${selected?.id === item.id ? "selected" : ""}`} key={item.id}>
@@ -138,7 +128,7 @@ export default function Home() {
             ))}
           </div>
         </aside>
-        <section className="map-panel"><PiuraMap properties={filtered.filter(isMappable)} resetViewKey={mapResetKey} onSelect={(item) => openDrawer(item)} />{!selected && <button className="mobile-list-toggle" aria-label={`Mostrar lista de ${filtered.length} propiedades`} onClick={() => setMobileList(true)}><span aria-hidden="true">☷</span> {filtered.length} propiedades</button>}</section>
+        <section className="map-panel"><PiuraMap properties={filtered.filter(isMappable)} resetViewKey={mapResetKey} layoutKey={`${mobileList}:${!!selected}`} onSelect={(item) => openDrawer(item)} />{!selected && <button className="mobile-list-toggle" aria-label={`Mostrar lista de ${filtered.length} propiedades`} onClick={() => setMobileList(true)}><span aria-hidden="true">☷</span> {filtered.length} propiedades</button>}</section>
       </section>
 
       {selected && <div className="property-drawer" role="dialog" aria-label={`Ficha de ${selected.title}`}>

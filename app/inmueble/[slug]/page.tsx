@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { formatPrice, isMappable, type Listing } from "../../lib/inventory";
 import { getPublishedListing } from "../../lib/property";
 import PropertyGallery from "./PropertyGallery";
 import PropertyMap from "./PropertyMap";
+import SiteHeader from "../../components/SiteHeader";
 
 type PageProps = { params: Promise<{ slug: string }> };
 
@@ -55,7 +55,7 @@ export default async function PropertyPage({ params }: PageProps) {
   const shownAttributes = attributes.filter(([, value]) => value !== null);
 
   return <main className="property-full-page">
-    <header className="property-full-header"><Link className="geo-logo" href="/">Geo<span>Propiedades</span><small>Piura</small></Link><Link href="/" className="property-full-back">← Volver al mapa</Link></header>
+    <SiteHeader />
     <article className="property-full-shell">
       <PropertyGallery images={property.imageItems} title={property.title} />
       <div className="property-full-content">

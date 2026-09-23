@@ -157,8 +157,32 @@ export function formatPrice(amount: number | null, currency: Currency): string {
   return currency === "PEN" ? `S/ ${number}` : currency === "USD" ? `US$ ${number}` : `${number} · Moneda no especificada`;
 }
 export function comparePrice(a: Listing, b: Listing, descending = false): number {
+  // Values in different currencies are deliberately grouped, never compared as FX.
+  if (a.currency !== b.currency) return (a.currency ?? "ZZZ").localeCompare(b.currency ?? "ZZZ");
   if (a.price === null) return b.price === null ? 0 : 1;
   if (b.price === null) return -1;
-  // No FX conversion: cross-currency ordering remains explicitly deferred.
   return descending ? b.price - a.price : a.price - b.price;
+}
+
+function searchText(value: string): string {
+  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("es-PE").trim();
+}
+
+export function filterAndSortListings(listings: Listing[], query: string, operation: string, type: string, sort: string): Listing[] {
+  const term = searchText(query);
+  const result = listings.filter(item => {
+    const searchable = [item.title, item.locationParts.district, item.locationParts.city, item.locationParts.region, item.type].join(" ");
+    return (!term || searchText(searchable).includes(term))
+      && (operation === "Todo" || item.operation === operation)
+      && (type === "Todo" || item.type === type);
+  });
+  if (sort === "priceAsc" || sort === "priceDesc") return [...result].sort((a, b) => comparePrice(a, b, sort === "priceDesc") || String(a.id).localeCompare(String(b.id)));
+  if (sort === "recent") return [...result].sort((a, b) => {
+    const first = a.publishedAt ? Date.parse(a.publishedAt) : NaN;
+    const second = b.publishedAt ? Date.parse(b.publishedAt) : NaN;
+    if (!Number.isFinite(first)) return Number.isFinite(second) ? 1 : String(a.id).localeCompare(String(b.id));
+    if (!Number.isFinite(second)) return -1;
+    return second - first || String(a.id).localeCompare(String(b.id));
+  });
+  return result;
 }

@@ -4,7 +4,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   metadataBase: new URL("https://inmueblesdirectos.com"),
   title: "Inmuebles Directos",
-  description: "Propiedades en venta y alquiler en Piura, ubicadas en un solo mapa.",
+  description: "Propiedades en venta y alquiler en Perú, ubicadas en un solo mapa.",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
