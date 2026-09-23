@@ -76,7 +76,8 @@ create policy "owners add own property images" on public.property_images
     and exists (select 1 from public.properties p where p.id=property_id and p.owner_id=(select auth.uid()))
   );
 
--- Storage owns the bytes. The authenticated owner's path is user/property/file;
+-- Storage owns the bytes and enforces the bucket's MIME and 5 MiB limits.
+-- The authenticated owner's path is user/property/file;
 -- the property must already belong to that user. Public reads still use the
 -- bucket's existing public setting. No overwrite policy is added.
 update storage.buckets set file_size_limit=5242880,
@@ -91,8 +92,6 @@ create policy "owners upload own property images" on storage.objects
       where p.id::text=(storage.foldername(name))[2] and p.owner_id=(select auth.uid())
     )
     and lower(metadata->>'mimetype') in ('image/jpeg','image/png','image/webp')
-    and (metadata->>'size') ~ '^[0-9]+$'
-    and (metadata->>'size')::bigint between 1 and 5242880
   );
 create policy "agents upload managed property images" on storage.objects
   for insert to authenticated with check (
@@ -104,8 +103,6 @@ create policy "agents upload managed property images" on storage.objects
         and (p.agent_id=(select auth.uid()) or p.owner_id=(select auth.uid()) or private.is_admin())
     )
     and lower(metadata->>'mimetype') in ('image/jpeg','image/png','image/webp')
-    and (metadata->>'size') ~ '^[0-9]+$'
-    and (metadata->>'size')::bigint between 1 and 5242880
   );
 
 notify pgrst, 'reload schema';

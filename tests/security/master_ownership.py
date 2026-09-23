@@ -98,7 +98,6 @@ def run_checks() -> None:
         (f"{A}/{PROPERTY_B}/b.png", valid, False),
         (f"{B}/{PROPERTY_A}/c.png", valid, False),
         (f"{A}/{PROPERTY_A}/d.exe", '{"mimetype":"application/x-msdownload","size":128}', False),
-        (f"{A}/{PROPERTY_A}/large.png", '{"mimetype":"image/png","size":5242881}', False),
     ):
         sql("insert into storage.objects(bucket_id,name,owner_id,metadata) values "
             f"('property-images','{name}','{A}','{metadata}')", role="authenticated", user=A, succeeds=succeeds)
@@ -155,23 +154,27 @@ def run_auth_publication_checks(root: pathlib.Path) -> None:
     # Exercise the real local Storage HTTP path in addition to SQL RLS checks.
     image = bytes.fromhex("89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
                           "0000000b49444154789c636000020000050001a5f645400000000049454e44ae426082")
-    def upload(path: str, content_type: str, *, allowed: bool) -> None:
+    def upload(path: str, content_type: str, *, allowed: bool, body: bytes = image) -> None:
         url = f"{status['api_url']}/storage/v1/object/property-images/{path}"
         local.reject_remote_value("Storage upload URL", url)
-        request = urllib.request.Request(url, data=image, method="POST", headers={
+        request = urllib.request.Request(url, data=body, method="POST", headers={
             "apikey": status["anon_key"], "Authorization": f"Bearer {token}",
             "Content-Type": content_type,
         })
+        detail = ""
         try:
             with urllib.request.urlopen(request, timeout=15) as response:
                 code = response.status
         except urllib.error.HTTPError as error:
             code = error.code
+            detail = error.read(300).decode("utf-8", errors="replace")
         if (code < 400) != allowed:
-            raise AssertionError(f"local Storage upload expectation failed: HTTP {code}")
+            raise AssertionError(f"local Storage upload expectation failed: HTTP {code} {detail}")
     upload(f"{user_id}/{property_id}/valid.png", "image/png", allowed=True)
     upload(f"{user_id}/{property_id}/invalid.txt", "text/plain", allowed=False)
     upload(f"{user_id}/{PROPERTY_B}/foreign.png", "image/png", allowed=False)
+    upload(f"{user_id}/{property_id}/oversize.png", "image/png", allowed=False,
+           body=image + b"x" * (5242881 - len(image)))
 
     logout_status, _ = client.request("POST", "/auth/v1/logout", token=token)
     if logout_status not in (200, 204):
