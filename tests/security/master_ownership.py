@@ -98,6 +98,17 @@ def run_checks() -> None:
                    role="authenticated", user=A)
     sql(f"select public.finalize_own_property_publication(id) from public.properties where slug='synthetic-draft'",
         role="authenticated", user=A, succeeds=False)
+    # Even the legacy agent branch must not provide a second direct public
+    # creation or draft-to-published transition path.
+    sql(f"update public.profiles set role='agent' where id='{B}'")
+    sql("insert into public.properties(title,slug,listing_type,property_type,status,price,lat,lng,owner_id,agent_id) "
+        f"values ('Agent public','agent-public','sale','house','published',300,-5,-80,'{B}','{B}')",
+        role="authenticated", user=B, succeeds=False)
+    sql("insert into public.properties(title,slug,listing_type,property_type,status,price,lat,lng,owner_id,agent_id) "
+        f"values ('Agent draft','agent-draft','sale','house','draft',300,-5,-80,'{B}','{B}')")
+    sql("update public.properties set status='published' where slug='agent-draft' returning id",
+        role="authenticated", user=B, succeeds=False)
+    assert sql("select status from public.properties where slug='agent-draft'") == "draft"
     assert PROPERTY_B not in sql(f"update public.properties set title='stolen' where id='{PROPERTY_B}' returning id", role="authenticated", user=A)
     assert sql(f"select title from public.properties where id='{PROPERTY_B}'") == "B"
     # Metadata and Storage belong only to an unfinished owner/property pair.
@@ -140,15 +151,8 @@ def run_checks() -> None:
                    f"where property_id='{draft_id}' returning id", role="authenticated", user=A)
     assert not sql(f"update public.property_images set property_id='{draft_id}' "
                    f"where property_id='{PROPERTY_B}' returning id", role="authenticated", user=A)
-    assert draft_path in sql(f"delete from storage.objects where bucket_id='property-images' "
-                             f"and name='{draft_path}' returning name", role="authenticated", user=A)
-    assert not sql(f"delete from storage.objects where bucket_id='property-images' "
-                   f"and name='{A}/{PROPERTY_A}/published.png' returning name", role="authenticated", user=A)
-    assert not sql(f"delete from storage.objects where bucket_id='property-images' "
-                   f"and name='{B}/{PROPERTY_B}/foreign.png' returning name", role="authenticated", user=A)
-    assert not sql(f"update storage.objects set name='{A}/{draft_id}/moved.png' "
-                   f"where bucket_id='property-images' and name='{draft_path}' returning name",
-                   role="authenticated", user=A)
+    # storage.protect_delete() rejects direct table DELETE even for a valid
+    # policy. Storage operations must be exercised through the Storage API.
     assert sql("select file_size_limit from storage.buckets where id='property-images'") == "5242880"
     # Legacy Storage UPDATE and DELETE policies have been deliberately removed;
     # cleanup permissions are limited to own draft objects.
@@ -253,7 +257,23 @@ def run_auth_publication_checks(root: pathlib.Path) -> None:
             detail = error.read(300).decode("utf-8", errors="replace")
         if (code < 400) != allowed:
             raise AssertionError(f"local Storage upload expectation failed: HTTP {code} {detail}")
+    def remove(path: str, *, allowed: bool) -> None:
+        url = f"{status['api_url']}/storage/v1/object/property-images/{path}"
+        local.reject_remote_value("Storage delete URL", url)
+        request = urllib.request.Request(url, method="DELETE", headers={
+            "apikey": status["anon_key"], "Authorization": f"Bearer {token}",
+        })
+        try:
+            with urllib.request.urlopen(request, timeout=15) as response:
+                code = response.status
+        except urllib.error.HTTPError as error:
+            code = error.code
+        if (code < 400) != allowed:
+            raise AssertionError(f"local Storage delete expectation failed: HTTP {code}")
     upload(f"{user_id}/{property_id}/valid.png", "image/png", allowed=True)
+    cleanup_path = f"{user_id}/{property_id}/cleanup.png"
+    upload(cleanup_path, "image/png", allowed=True)
+    remove(cleanup_path, allowed=True)
     upload(f"{user_id}/{property_id}/invalid.txt", "text/plain", allowed=False)
     upload(f"{user_id}/{PROPERTY_B}/foreign.png", "image/png", allowed=False)
     upload(f"{user_id}/{property_id}/oversize.png", "image/png", allowed=False,
@@ -270,6 +290,7 @@ def run_auth_publication_checks(root: pathlib.Path) -> None:
         token=token, payload={"p_property_id": property_id})
     if finalize_status != 200 or finalized_slug != slug:
         raise AssertionError(f"controlled finalization failed: HTTP {finalize_status}")
+    remove(path, allowed=False)
     public_status, public_rows = client.request("GET", f"/rest/v1/properties?{query}")
     if public_status != 200 or len(public_rows) != 1 or public_rows[0]["status"] != "published":
         raise AssertionError("completed listing did not become publicly visible")

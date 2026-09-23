@@ -68,6 +68,10 @@ create policy "owners publish own properties" on public.properties
   for insert to authenticated with check (
     owner_id = (select auth.uid()) and agent_id is null and status = 'draft'
   );
+-- Restrictive policies combine with every permissive INSERT policy. This also
+-- prevents the legacy agent policy from creating a public row directly.
+create policy "authenticated property creation starts as draft" on public.properties
+  as restrictive for insert to authenticated with check (status='draft');
 create policy "owners discard own unfinished properties" on public.properties
   for delete to authenticated using (
     owner_id = (select auth.uid()) and agent_id is null and status = 'draft'
@@ -149,6 +153,27 @@ create policy "owners discard unfinished property image objects" on storage.obje
       where p.id::text=(storage.foldername(name))[2]
         and p.owner_id=(select auth.uid()) and p.status='draft' and p.agent_id is null)
   );
+
+-- Legacy agents may update managed rows, but cannot use that UPDATE grant to
+-- publish a new draft outside the controlled SECURITY DEFINER function. The
+-- trigger runs as the caller; the finalization RPC runs as its trusted owner.
+create function private.guard_property_publication_transition()
+returns trigger language plpgsql security invoker set search_path = '' as $guard$
+begin
+  if current_user in ('anon','authenticated') and new.status='published' then
+    if tg_op='INSERT' then
+      raise exception 'Use controlled property finalization' using errcode='42501';
+    elsif old.status is distinct from 'published' then
+      raise exception 'Use controlled property finalization' using errcode='42501';
+    end if;
+  end if;
+  return new;
+end;
+$guard$;
+revoke all on function private.guard_property_publication_transition() from public, anon, authenticated;
+create trigger guard_property_publication_transition
+  before insert or update on public.properties
+  for each row execute function private.guard_property_publication_transition();
 
 -- The only public transition available to an ordinary owner. Direct REST
 -- INSERT/UPDATE cannot publish a row; this function validates the completed
