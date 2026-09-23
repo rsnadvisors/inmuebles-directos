@@ -7,6 +7,10 @@ import pathlib
 import shutil
 import sys
 import tempfile
+import urllib.error
+import urllib.parse
+import urllib.request
+import uuid
 
 import profile_authorization as local
 
@@ -102,11 +106,85 @@ def run_checks() -> None:
     print("PASS: anonymous bypass closed; public read; E0 role guard; owner isolation; image and Storage policies")
 
 
+def run_auth_publication_checks(root: pathlib.Path) -> None:
+    status = local.local_status(root)
+    client = local.LocalClient(status["api_url"], status["anon_key"])
+    nonce = uuid.uuid4().hex
+    email = f"master-owner-{nonce}@example.invalid"
+    password = f"Master-local-{nonce}!Aa9"
+    signup_status, signup = client.request(
+        "POST", "/auth/v1/signup",
+        payload={"email": email, "password": password, "data": {"full_name": "Local Owner"}},
+    )
+    if signup_status not in (200, 201) or not isinstance(signup, dict) or not signup.get("access_token"):
+        raise AssertionError(f"local signup failed: HTTP {signup_status}")
+    user_id = signup["user"]["id"]
+    if client.profile({"id": user_id, "token": signup["access_token"]})["role"] != "viewer":
+        raise AssertionError("signup did not create a viewer profile")
+    login_status, login = client.request(
+        "POST", "/auth/v1/token?grant_type=password",
+        payload={"email": email, "password": password},
+    )
+    if login_status != 200 or not isinstance(login, dict) or not login.get("access_token"):
+        raise AssertionError(f"local password login failed: HTTP {login_status}")
+    token = login["access_token"]
+    user_status, current_user = client.request("GET", "/auth/v1/user", token=token)
+    if user_status != 200 or current_user.get("id") != user_id:
+        raise AssertionError("authenticated session does not resolve to its user")
+
+    slug = f"local-owner-{nonce}"
+    payload = {
+        "title": "Local owner property", "slug": slug, "listing_type": "sale",
+        "property_type": "house", "status": "published", "price": 100,
+        "currency": "PEN", "lat": -5, "lng": -80, "owner_id": user_id,
+    }
+    anon_status, _ = client.request("POST", "/rest/v1/properties", payload=payload)
+    if anon_status < 400:
+        raise AssertionError("anonymous REST publication unexpectedly succeeded")
+    insert_status, _ = client.request("POST", "/rest/v1/properties", token=token, payload=payload)
+    if insert_status not in (200, 201):
+        raise AssertionError(f"authenticated owner REST publication failed: HTTP {insert_status}")
+    query = urllib.parse.urlencode({"slug": f"eq.{slug}", "select": "id,owner_id,status"})
+    read_status, rows = client.request("GET", f"/rest/v1/properties?{query}", token=token)
+    if read_status != 200 or not isinstance(rows, list) or len(rows) != 1:
+        raise AssertionError("owner cannot read newly published property")
+    property_id = rows[0]["id"]
+    if rows[0]["owner_id"] != user_id or rows[0]["status"] != "published":
+        raise AssertionError("published property lost its verified owner/status")
+
+    # Exercise the real local Storage HTTP path in addition to SQL RLS checks.
+    image = bytes.fromhex("89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
+                          "0000000b49444154789c636000020000050001a5f645400000000049454e44ae426082")
+    def upload(path: str, content_type: str, *, allowed: bool) -> None:
+        url = f"{status['api_url']}/storage/v1/object/property-images/{path}"
+        local.reject_remote_value("Storage upload URL", url)
+        request = urllib.request.Request(url, data=image, method="POST", headers={
+            "apikey": status["anon_key"], "Authorization": f"Bearer {token}",
+            "Content-Type": content_type,
+        })
+        try:
+            with urllib.request.urlopen(request, timeout=15) as response:
+                code = response.status
+        except urllib.error.HTTPError as error:
+            code = error.code
+        if (code < 400) != allowed:
+            raise AssertionError(f"local Storage upload expectation failed: HTTP {code}")
+    upload(f"{user_id}/{property_id}/valid.png", "image/png", allowed=True)
+    upload(f"{user_id}/{property_id}/invalid.txt", "text/plain", allowed=False)
+    upload(f"{user_id}/{PROPERTY_B}/foreign.png", "image/png", allowed=False)
+
+    logout_status, _ = client.request("POST", "/auth/v1/logout", token=token)
+    if logout_status not in (200, 204):
+        raise AssertionError(f"local logout failed: HTTP {logout_status}")
+    print("PASS: local Auth signup/login/session/logout; profile; owner-bound REST publication; Storage HTTP upload")
+
+
 def main() -> None:
     root = prepare()
     try:
         local.reset_local_database(root)
         run_checks()
+        run_auth_publication_checks(root)
     finally:
         shutil.rmtree(root)
 
