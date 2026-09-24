@@ -1,8 +1,19 @@
-import { describe, expect, it } from "vitest";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import Home from "../app/page";
 import PublishPage from "../app/publicar/page";
 import RoutePage from "../app/[...slug]/page";
+
+vi.mock("../app/lib/auth-client", async () => {
+  const { supabase } = await import("./mocks/supabase");
+  return { getBrowserClient: () => ({
+    ...supabase,
+    auth: {
+      getUser: async () => ({ data: { user: null }, error: null }),
+      onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => {} } } }),
+    },
+  }) };
+});
 
 async function renderHome() {
   render(<Home />);
@@ -23,9 +34,13 @@ describe("baseline smoke tests (offline)", () => {
   it("opens a property drawer and its gallery, then closes them", async () => {
     await renderHome();
     const card = screen.getByRole("heading", { name: "Casa de prueba" }).closest("article")!;
-    fireEvent.click(within(card).getByRole("button", { name: /Ver ficha y contacto/ }));
+    fireEvent.click(within(card).getByRole("button", { name: "Ver detalles" }));
     expect(screen.getByRole("dialog", { name: "Ficha de Casa de prueba" })).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Ficha completa" }).getAttribute("href")).toBe("/inmueble/fixture-house");
+    const canonicalLink = screen.getByRole("link", { name: "Ficha completa" });
+    expect(canonicalLink.getAttribute("href")).toBe("/inmueble/fixture-house");
+    expect(canonicalLink.className).toContain("drawer-primary-action");
+    expect(screen.queryByText("Publicado")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Guardar/ })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Ampliar galería" }));
     expect(screen.getByRole("dialog", { name: "Galería de Casa de prueba" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Cerrar galería" }));
@@ -49,7 +64,7 @@ describe("baseline smoke tests (offline)", () => {
       fireEvent.click(toggle);
       expect(toggle.isConnected).toBe(true);
       const card = screen.getByRole("heading", { name: "Casa de prueba" }).closest("article")!;
-      fireEvent.click(within(card).getByRole("button", { name: /Ver ficha y contacto/ }));
+      fireEvent.click(within(card).getByRole("button", { name: "Ver detalles" }));
       expect(screen.getByRole("dialog", { name: "Ficha de Casa de prueba" })).toBeTruthy();
       expect(toggle.isConnected).toBe(false);
       expect(screen.queryByRole("button", { name: /Mostrar lista de/, hidden: true })).toBeNull();
@@ -57,6 +72,30 @@ describe("baseline smoke tests (offline)", () => {
       expect(screen.queryByRole("dialog")).toBeNull();
       expect(screen.getByRole("button", { name: "Mostrar lista de 3 propiedades" })).toBeTruthy();
     }
+  });
+
+  it("uses a native preview control, closes with Escape and restores focus", async () => {
+    await renderHome();
+    const card = screen.getByRole("heading", { name: "Casa de prueba" }).closest("article")!;
+    const trigger = within(card).getByRole("button", { name: "Ver detalles" });
+    trigger.focus();
+    fireEvent.click(trigger);
+    const close = screen.getByRole("button", { name: "Cerrar detalle de propiedad" });
+    expect(document.activeElement).toBe(close);
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Ficha de Casa de prueba" })).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+  });
+
+  it("shows consistent neutral media for a zero-image property", async () => {
+    await renderHome();
+    const card = screen.getByRole("heading", { name: "Departamento de prueba" }).closest("article")!;
+    expect(within(card).getByText("Sin fotografía")).toBeTruthy();
+    expect(within(card).queryByRole("img")).toBeNull();
+    fireEvent.click(within(card).getByRole("button", { name: "Ver detalles" }));
+    const drawer = screen.getByRole("dialog", { name: "Ficha de Departamento de prueba" });
+    expect(within(drawer).getByText("Sin fotografías disponibles")).toBeTruthy();
+    expect(within(drawer).queryByRole("img")).toBeNull();
   });
 
   it("represents an empty filtered list without a fatal exception", async () => {

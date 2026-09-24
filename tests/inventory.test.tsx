@@ -1,9 +1,20 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import Home from "../app/page";
-import { coordinates, formatPrice, normalizeListing, optionalNumber } from "../app/lib/inventory";
+import { compactLocation, comparisonAttributes, coordinates, formatPrice, normalizeListing, optionalNumber, previewLocation, primaryImage } from "../app/lib/inventory";
 import { properties } from "./fixtures/properties";
 import { refreshInventory, setInventory, setResponse } from "./mocks/supabase";
+
+vi.mock("../app/lib/auth-client", async () => {
+  const { supabase } = await import("./mocks/supabase");
+  return { getBrowserClient: () => ({
+    ...supabase,
+    auth: {
+      getUser: async () => ({ data: { user: null }, error: null }),
+      onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => {} } } }),
+    },
+  }) };
+});
 
 const row = (extra = {}) => ({ ...properties[0], ...extra });
 describe("inventory normalization", () => {
@@ -53,6 +64,36 @@ describe("inventory normalization", () => {
     expect(normalized.images).toEqual(["second", "first"]);
     expect(normalized.imageItems[0]).toEqual({ url: "second", altText: "Cover alt" });
     expect(images[0].public_url).toBe("second");
+  });
+  it("derives compact and preview locations from normalized location parts", () => {
+    const item = normalizeListing(row({ address: " Avenida Uno ", district: "Centro", city: "Piura", region: "Piura" }))!;
+    expect(compactLocation(item)).toBe("Centro, Piura");
+    expect(previewLocation(item)).toBe("Avenida Uno, Centro, Piura");
+    expect(compactLocation(normalizeListing(row({ address: "Solo dirección", district: null, city: null }))!)).toBe("Solo dirección");
+    expect(compactLocation(normalizeListing(row({ address: null, district: null, city: null }))!)).toBe("Ubicación no especificada");
+  });
+  it("uses the already-normalized primary image without reordering in the surface", () => {
+    const item = normalizeListing(row({ property_images: [
+      { id: "later", public_url: "later", sort_order: 4, is_cover: false },
+      { id: "cover", public_url: "cover", sort_order: 8, is_cover: true },
+    ] }))!;
+    expect(primaryImage(item)).toEqual({ url: "cover", altText: null });
+    expect(primaryImage(normalizeListing(row({ property_images: [] }))!)).toBeNull();
+  });
+  it.each([
+    ["house", ["area", "bedrooms", "bathrooms", "parking"]],
+    ["apartment", ["area", "bedrooms", "bathrooms", "parking"]],
+    ["land", ["area"]],
+    ["office", ["area", "bathrooms", "parking"]],
+    ["commercial", ["area", "bathrooms", "parking"]],
+  ])("builds type-aware %s comparison attributes", (propertyType, expected) => {
+    const item = normalizeListing(row({ property_type: propertyType, area_total_m2: 0, bedrooms: 0, bathrooms: 0, parking_spaces: 0 }))!;
+    expect(comparisonAttributes(item).map(attribute => attribute.key)).toEqual(expected);
+    expect(comparisonAttributes(item).every(attribute => attribute.value === 0)).toBe(true);
+  });
+  it("omits null comparison attributes without losing persisted zero", () => {
+    const item = normalizeListing(row({ area_total_m2: 0, bedrooms: null, bathrooms: 0, parking_spaces: null }))!;
+    expect(comparisonAttributes(item).map(({ key, value }) => [key, value])).toEqual([["area", 0], ["bathrooms", 0]]);
   });
   it("keeps full-detail nulls distinct from legitimate zero values", () => {
     const item = normalizeListing(row({ area_built_m2: null, maintenance_fee: 0, floors: 0, region: "Piura", country: "Perú", published_at: null }))!;
@@ -123,7 +164,7 @@ describe("inventory state and surfaces", () => {
     await screen.findByRole("heading", { name: "Casa de prueba" });
     expect(screen.getAllByRole("article")).toHaveLength(1);
     expect(screen.getByLabelText("Número de marcadores").textContent).toBe("0");
-    fireEvent.click(screen.getByRole("button", { name: /Ver ficha y contacto/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Ver detalles" }));
     expect(screen.getByRole("dialog")).toBeTruthy();
   });
   it("keeps office and commercial distinct in filters", async () => {
@@ -149,9 +190,28 @@ describe("inventory state and surfaces", () => {
     expect(within(card).getByText(/Oficinas/)).toBeTruthy();
     const marker = JSON.parse(screen.getByLabelText("Semántica de marcadores").textContent!)[0];
     expect(marker).toMatchObject({ price: "S/ 250,000", operation: "Comprar", type: "Oficinas" });
-    fireEvent.click(within(card).getByRole("button"));
+    fireEvent.click(within(card).getByRole("button", { name: "Ver detalles" }));
     expect(within(screen.getByRole("dialog")).getByText("S/ 250,000")).toBeTruthy();
     expect(screen.queryByText(/\/mes/)).toBeNull();
+  });
+  it("renders zero attributes and applies non-residential attribute rules", async () => {
+    setInventory([
+      row({ id: "zero", slug: "zero", property_type: "apartment", area_total_m2: 0, bedrooms: 0, bathrooms: 0, parking_spaces: 0 }),
+      row({ id: "land", slug: "land", title: "Terreno irregular", property_type: "land", area_total_m2: 90, bedrooms: 5, bathrooms: 4, parking_spaces: 3 }),
+      row({ id: "office", slug: "office", title: "Oficina de prueba", property_type: "office", area_total_m2: 75, bedrooms: 2, bathrooms: 1, parking_spaces: 1 }),
+    ]);
+    render(<Home />);
+    const zeroCard = (await screen.findByText("0 m²")).closest("article")!;
+    expect(within(zeroCard).getByText("0 hab.")).toBeTruthy();
+    expect(within(zeroCard).getByText("0 baños")).toBeTruthy();
+    expect(within(zeroCard).getByText("0 est.")).toBeTruthy();
+    const landCard = screen.getByRole("heading", { name: "Terreno irregular" }).closest("article")!;
+    expect(within(landCard).getByText("90 m²")).toBeTruthy();
+    expect(within(landCard).queryByText("5 hab.")).toBeNull();
+    expect(within(landCard).queryByText("4 baños")).toBeNull();
+    const officeCard = screen.getByRole("heading", { name: "Oficina de prueba" }).closest("article")!;
+    expect(within(officeCard).queryByText("2 hab.")).toBeNull();
+    expect(within(officeCard).getByText("1 baño")).toBeTruthy();
   });
 });
 
