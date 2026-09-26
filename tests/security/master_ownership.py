@@ -188,6 +188,9 @@ def run_auth_publication_checks(root: pathlib.Path) -> None:
     user_status, current_user = client.request("GET", "/auth/v1/user", token=token)
     if user_status != 200 or current_user.get("id") != user_id:
         raise AssertionError("authenticated session does not resolve to its user")
+    other = client.signup("other-owner")
+    if client.profile(other)["role"] != "viewer":
+        raise AssertionError("second local user is not a viewer")
 
     slug = f"local-owner-{nonce}"
     payload = {
@@ -226,6 +229,16 @@ def run_auth_publication_checks(root: pathlib.Path) -> None:
     public_status, public_rows = client.request("GET", f"/rest/v1/properties?{query}")
     if public_status != 200 or public_rows != []:
         raise AssertionError("unfinished draft became publicly visible")
+    by_id = urllib.parse.urlencode({"id": f"eq.{property_id}", "select": "id,status"})
+    for label, path in (("id", by_id), ("slug", query)):
+        anon_status, anon_rows = client.request("GET", f"/rest/v1/properties?{path}")
+        other_status, other_rows = client.request("GET", f"/rest/v1/properties?{path}", token=other["token"])
+        if anon_status != 200 or anon_rows != [] or other_status != 200 or other_rows != []:
+            raise AssertionError(f"draft exposed by {label} to anon or another viewer")
+    published_query = urllib.parse.urlencode({"slug": f"eq.{slug}", "status": "eq.published", "select": "id"})
+    filtered_status, filtered_rows = client.request("GET", f"/rest/v1/properties?{published_query}")
+    if filtered_status != 200 or filtered_rows != []:
+        raise AssertionError("draft appeared in Home/canonical public query")
     premature_status, _ = client.request("POST", "/rest/v1/rpc/finalize_own_property_publication",
                                          token=token, payload={"p_property_id": property_id})
     if premature_status < 400:
@@ -271,6 +284,17 @@ def run_auth_publication_checks(root: pathlib.Path) -> None:
         if (code < 400) != allowed:
             raise AssertionError(f"local Storage delete expectation failed: HTTP {code}")
     upload(f"{user_id}/{property_id}/valid.png", "image/png", allowed=True)
+    path = f"{user_id}/{property_id}/valid.png"
+    public_url = f"{status['api_url']}/storage/v1/object/public/property-images/{path}"
+    local.reject_remote_value("public draft image URL", public_url)
+    with urllib.request.urlopen(public_url, timeout=15) as response:
+        if response.status != 200 or response.read() != image:
+            raise AssertionError("known public-bucket draft image URL did not return the uploaded bytes")
+    if sql("select status from public.properties where id='" + property_id + "'") != "draft":
+        raise AssertionError("Storage upload changed the draft state")
+    filtered_status, filtered_rows = client.request("GET", f"/rest/v1/properties?{published_query}")
+    if filtered_status != 200 or filtered_rows != []:
+        raise AssertionError("draft appeared in public query after Storage upload")
     cleanup_path = f"{user_id}/{property_id}/cleanup.png"
     upload(cleanup_path, "image/png", allowed=True)
     remove(cleanup_path, allowed=True)
@@ -279,13 +303,24 @@ def run_auth_publication_checks(root: pathlib.Path) -> None:
     upload(f"{user_id}/{property_id}/oversize.png", "image/png", allowed=False,
            body=image + b"x" * (5242881 - len(image)))
 
-    path = f"{user_id}/{property_id}/valid.png"
     metadata_status, _ = client.request("POST", "/rest/v1/property_images", token=token,
         payload={"property_id": property_id, "storage_path": path,
-                 "public_url": f"{status['api_url']}/storage/v1/object/public/property-images/{path}",
+                 "public_url": public_url,
                  "sort_order": 0, "is_cover": True})
     if metadata_status not in (200, 201):
         raise AssertionError(f"local image metadata insert failed: HTTP {metadata_status}")
+    image_query = urllib.parse.urlencode({"property_id": f"eq.{property_id}", "select": "id"})
+    for label, actor in (("anon", None), ("other", other["token"])):
+        image_status, image_rows = client.request("GET", f"/rest/v1/property_images?{image_query}", token=actor)
+        if image_status != 200 or image_rows != []:
+            raise AssertionError(f"draft image metadata exposed to {label}")
+    owner_image_status, owner_images = client.request("GET", f"/rest/v1/property_images?{image_query}", token=token)
+    if owner_image_status != 200 or len(owner_images) != 1:
+        raise AssertionError("owner cannot read their draft image metadata")
+    other_finalize, _ = client.request("POST", "/rest/v1/rpc/finalize_own_property_publication",
+        token=other["token"], payload={"p_property_id": property_id})
+    if other_finalize < 400 or sql("select status from public.properties where id='" + property_id + "'") != "draft":
+        raise AssertionError("another viewer finalized the owner's draft")
     finalize_status, finalized_slug = client.request("POST", "/rest/v1/rpc/finalize_own_property_publication",
         token=token, payload={"p_property_id": property_id})
     if finalize_status != 200 or finalized_slug != slug:
@@ -294,6 +329,10 @@ def run_auth_publication_checks(root: pathlib.Path) -> None:
     public_status, public_rows = client.request("GET", f"/rest/v1/properties?{query}")
     if public_status != 200 or len(public_rows) != 1 or public_rows[0]["status"] != "published":
         raise AssertionError("completed listing did not become publicly visible")
+    filtered_status, filtered_rows = client.request("GET", f"/rest/v1/properties?{published_query}")
+    public_image_status, public_images = client.request("GET", f"/rest/v1/property_images?{image_query}")
+    if filtered_status != 200 or len(filtered_rows) != 1 or public_image_status != 200 or len(public_images) != 1:
+        raise AssertionError("finalized property or image is absent from the public query")
     foreign_finalize, _ = client.request("POST", "/rest/v1/rpc/finalize_own_property_publication",
         token=token, payload={"p_property_id": PROPERTY_B})
     if foreign_finalize < 400:
