@@ -65,7 +65,7 @@ export default function Home() {
       setAllListings([]);
       setSelected(null);
       try {
-        const { data, error } = await supabase.from("properties").select("id,title,slug,status,listing_type,property_type,price,currency,area_total_m2,address,district,city,region,country,description,bedrooms,bathrooms,parking_spaces,lat,lng,published_at,property_images(id,public_url,alt_text,sort_order,is_cover)").eq("status", "published");
+        const { data, error } = await supabase.from("properties").select("id,title,slug,status,listing_type,property_type,price,currency,area_total_m2,address,district,city,region,country,description,bedrooms,bathrooms,parking_spaces,lat,lng,published_at,property_images(id,storage_bucket,public_url,alt_text,sort_order,is_cover)").eq("status", "published");
         if (!active || request !== requestSequence) return;
         if (error) throw error;
         setAllListings(normalizeInventory(data));

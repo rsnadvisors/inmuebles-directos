@@ -1,3 +1,5 @@
+import { resolvePropertyImage } from "./property-image-source";
+
 export type Currency = "PEN" | "USD" | null;
 export const operations = ["Comprar", "Alquilar"] as const;
 export const propertyTypes = ["Casas", "Departamentos", "Terrenos", "Oficinas", "Locales comerciales"] as const;
@@ -117,13 +119,13 @@ export function normalizeListing(value: unknown): Listing | null {
     ? typeMap[item.property_type] : "Tipo no especificado";
   const images = (Array.isArray(item.property_images) ? item.property_images.filter(record) : [])
     .map((image, index) => ({
-      url: text(image.public_url),
+      url: resolvePropertyImage(image),
       altText: text(image.alt_text) || null,
       isCover: image.is_cover === true,
       sortOrder: optionalNumber(image.sort_order),
       fallback: text(image.id) || `${text(image.public_url)}:${index}`,
     }))
-    .filter(image => image.url)
+    .filter((image): image is typeof image & { url: string } => image.url !== null)
     .sort((a, b) => Number(b.isCover) - Number(a.isCover)
       || (a.sortOrder ?? Number.MAX_SAFE_INTEGER) - (b.sortOrder ?? Number.MAX_SAFE_INTEGER)
       || a.fallback.localeCompare(b.fallback));

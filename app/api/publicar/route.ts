@@ -1,9 +1,17 @@
 import { imageExtensions, MAX_REQUEST_BYTES, PublicationValidationError, validatePublication } from "../../lib/publication";
 import { getVerifiedUser } from "../../lib/auth-server";
+import { PRIVATE_PROPERTY_IMAGE_BUCKET, anonymousImageClient, loadPublishedPrivateImage } from "../../lib/property-images";
 
 export const runtime = "nodejs";
 const failure = (code: string, message: string, status: number) => Response.json({ ok: false, code, message }, { status });
 class BodyTooLarge extends Error {}
+
+async function deliveryAvailable(imageId: string | null): Promise<boolean> {
+  const client = anonymousImageClient();
+  if (!client || !imageId) return false;
+  try { const image = await loadPublishedPrivateImage(client, imageId); return image !== null && image.size > 0; }
+  catch { return false; }
+}
 
 // Count actual bytes before multipart parsing. This is not an ingress/concurrency limit.
 async function readForm(request: Request): Promise<FormData> {
@@ -46,8 +54,9 @@ export async function POST(request: Request): Promise<Response> {
     return failure("INVALID_REQUEST", "No se pudo leer el formulario.", 400);
   }
   let propertyId: string | null = null;
+  let primaryImageId: string | null = null;
   const attemptedPaths: string[] = [];
-  let stage: "create" | "upload" | "metadata" | "finalize" = "create";
+  let stage: "create" | "upload" | "metadata" | "finalize" | "delivery" = "create";
   try {
     const { files, ...propertyFields } = input;
     const slug = `${input.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "propiedad"}-${crypto.randomUUID()}`;
@@ -58,25 +67,34 @@ export async function POST(request: Request): Promise<Response> {
       const path = `${user.id}/${property.id}/${crypto.randomUUID()}.${imageExtensions[file.type as keyof typeof imageExtensions]}`;
       attemptedPaths.push(path);
       stage = "upload";
-      const upload = await supabase.storage.from("property-images").upload(path, file, { contentType: file.type, upsert: false });
+      const upload = await supabase.storage.from(PRIVATE_PROPERTY_IMAGE_BUCKET).upload(path, file, { contentType: file.type, upsert: false });
       if (upload.error) throw new Error("Upload failed");
-      const { data } = supabase.storage.from("property-images").getPublicUrl(path);
       stage = "metadata";
-      const image = await supabase.from("property_images").insert({ property_id: property.id, storage_path: path, public_url: data.publicUrl, sort_order: index, is_cover: index === 0 });
-      if (image.error) throw new Error("Image metadata failed");
+      const image = await supabase.from("property_images").insert({ property_id: property.id, storage_bucket: PRIVATE_PROPERTY_IMAGE_BUCKET, storage_path: path, public_url: null, sort_order: index, is_cover: index === 0 }).select("id").single();
+      if (image.error || !image.data?.id) throw new Error("Image metadata failed");
+      if (index === 0) primaryImageId = image.data.id;
     }
     stage = "finalize";
     const finalized = await supabase.rpc("finalize_own_property_publication", { p_property_id: property.id });
     if (finalized.error || finalized.data !== slug) throw new Error("Finalization failed");
+    stage = "delivery";
+    if (!await deliveryAvailable(primaryImageId)) throw new Error("Published image delivery unconfirmed");
     return Response.json({ ok: true, status: "published", slug });
   } catch {
     if (!propertyId) return failure("DRAFT_CREATE_UNCERTAIN", "No pudimos confirmar la creación del borrador. Revisa Mis propiedades antes de volver a intentar.", 502);
+    // The RPC has committed. Never clean up or retry writes on a delivery
+    // failure; the user must inspect the existing listing before trying again.
+    if (stage === "delivery") return failure("DELIVERY_UNCERTAIN", "La publicación quedó registrada, pero no pudimos confirmar la imagen. Revisa Mis propiedades antes de volver a intentar.", 502);
     if (stage === "finalize") {
       // A lost RPC response may hide a committed publication. Verify before
       // claiming that the listing is unpublished or attempting cleanup.
       try {
         const result = await supabase.from("properties").select("status,slug").eq("id", propertyId).maybeSingle();
-        if (!result.error && result.data?.status === "published") return Response.json({ ok: true, status: "published", slug: result.data.slug });
+        if (!result.error && result.data?.status === "published") {
+          return await deliveryAvailable(primaryImageId)
+            ? Response.json({ ok: true, status: "published", slug: result.data.slug })
+            : failure("DELIVERY_UNCERTAIN", "La publicación quedó registrada, pero no pudimos confirmar la imagen. Revisa Mis propiedades antes de volver a intentar.", 502);
+        }
         if (result.error || !result.data || result.data.status !== "draft") return failure("FINALIZATION_UNCERTAIN", "No pudimos confirmar el resultado. Revisa Mis propiedades antes de volver a intentar.", 502);
       } catch { return failure("FINALIZATION_UNCERTAIN", "No pudimos confirmar el resultado. Revisa Mis propiedades antes de volver a intentar.", 502); }
     }
@@ -84,7 +102,7 @@ export async function POST(request: Request): Promise<Response> {
     // RLS denies removing Storage objects or rows after publication.
     try {
       if (attemptedPaths.length) {
-        const removed = await supabase.storage.from("property-images").remove(attemptedPaths);
+        const removed = await supabase.storage.from(PRIVATE_PROPERTY_IMAGE_BUCKET).remove(attemptedPaths);
         if (removed.error) throw new Error("Storage cleanup failed");
       }
       const images = await supabase.from("property_images").delete().eq("property_id", propertyId);
