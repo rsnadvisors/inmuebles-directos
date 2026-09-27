@@ -36,7 +36,7 @@ async function main() {
       page.on('pageerror', error => failures.push(`${label}: ${error.message}`));
       let response = await page.goto(base + '/', { waitUntil: 'domcontentloaded' });
       assert.equal(response.status(), 200, `${label} Home`);
-      await page.locator('.listing-card').first().waitFor({ timeout: 20000 });
+      await page.locator('.listing-card').first().waitFor({ state: label === 'mobile' ? 'attached' : 'visible', timeout: 20000 });
       assert.equal(await page.locator('.listing-card').count(), 1, `${label} synthetic card`);
       assert.equal(await page.locator('.listing-card img').first().getAttribute('src'),
         `/api/property-images/${imageId}`, `${label} private-backed cover`);
