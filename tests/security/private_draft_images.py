@@ -8,6 +8,8 @@ uses a linked project, production URL, production credentials or user data.
 from __future__ import annotations
 
 import json
+import base64
+import os
 import pathlib
 import shutil
 import sys
@@ -15,6 +17,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+import time
 
 import master_ownership as master
 import profile_authorization as local
@@ -49,6 +52,25 @@ def rows(client: local.LocalClient, table: str, filters: dict[str, str], token: 
     if status != 200 or not isinstance(data, list):
         raise AssertionError(f"{table} SELECT failed with HTTP {status}")
     return data
+
+
+def app_get(app_url: str, path: str, token: str | None = None) -> tuple[int, bytes, dict[str, str]]:
+    local.reject_remote_value("application URL", app_url)
+    headers: dict[str, str] = {}
+    if token:
+        # The local Supabase URL is 127.0.0.1, so its default SSR storage key
+        # is sb-127-auth-token. This cookie exists only for synthetic lab users.
+        session = {"access_token": token, "refresh_token": "synthetic-unused",
+                   "token_type": "bearer", "expires_at": int(time.time()) + 3600,
+                   "expires_in": 3600}
+        encoded = base64.urlsafe_b64encode(json.dumps(session).encode()).decode().rstrip("=")
+        headers["Cookie"] = "sb-127-auth-token=base64-" + encoded
+    request = urllib.request.Request(app_url.rstrip("/") + path, headers=headers)
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            return response.status, response.read(), dict(response.headers)
+    except urllib.error.HTTPError as error:
+        return error.code, error.read(), dict(error.headers)
 
 
 def expect_private_listing(client: local.LocalClient, path: str, token: str | None, visible: bool) -> None:
@@ -128,6 +150,19 @@ def run() -> None:
         if image["storage_bucket"] != "property-images-private" or image["public_url"] is not None:
             raise AssertionError("new image source metadata incorrect")
 
+        app_url = os.environ.get("LOCAL_APP_URL")
+        if app_url:
+            for token, expected in ((None, 404), (owner["token"], 404), (other["token"], 404)):
+                code, _, _ = app_get(app_url, "/api/property-images/" + image["id"], token)
+                if code != expected:
+                    raise AssertionError(f"draft public application delivery returned HTTP {code}")
+            for token, expected in ((None, 401), (owner["token"], 200), (other["token"], 404)):
+                code, body, headers = app_get(app_url, "/api/property-images/" + image["id"] + "/preview", token)
+                if code != expected:
+                    raise AssertionError(f"draft preview returned HTTP {code}, expected {expected}")
+                if code == 200 and (body != PNG or headers.get("Cache-Control") != "private, no-store"):
+                    raise AssertionError("owner preview bytes or cache policy differ")
+
         for actor, label in ((None, "anon"), (other["token"], "other")):
             if rows(client, "property_images", {"id": "eq." + image["id"]}, actor):
                 raise AssertionError(f"{label} read draft image metadata")
@@ -153,11 +188,47 @@ def run() -> None:
             code, data = storage(client, "GET", image_suffix, actor)
             if code != 200 or data != PNG:
                 raise AssertionError(f"{label} cannot download published private-backed image: HTTP {code}")
-        # Legacy public URL and external URL remain valid representational
-        # fixtures. No legacy object is copied or moved by the migration.
+            if app_url:
+                code, body, headers = app_get(app_url, "/api/property-images/" + image["id"], actor)
+                if code != 200 or body != PNG or headers.get("Cache-Control") != "no-store":
+                    raise AssertionError(f"{label} application delivery failed: HTTP {code}")
+        # Local service credentials are used only to construct a synthetic
+        # legacy object; the application never receives this credential.
+        local_status = json.loads(local.run([
+            "supabase", "status", "--output", "json", "--workdir", str(root),
+        ]).stdout)
+        service_key = local_status.get("SERVICE_ROLE_KEY") or local_status.get("service_role_key")
+        if not service_key:
+            raise AssertionError("local fixture credential unavailable")
+        legacy_path = "synthetic/" + uuid.uuid4().hex + ".png"
+        code, _ = storage(client, "POST", "object/property-images/" + legacy_path,
+                          service_key, PNG, "image/png")
+        if code not in (200, 201):
+            raise AssertionError(f"synthetic legacy public upload failed: HTTP {code}")
+        public_url = client.api_url + "/storage/v1/object/public/property-images/" + legacy_path
+        external_url = "https://example.invalid/synthetic-external.png"
+        master.sql("insert into public.property_images(property_id,storage_bucket,storage_path,public_url,is_cover,sort_order) values "
+                   f"('{property_id}','property-images','{legacy_path}','{public_url}',false,1),"
+                   f"('{property_id}','property-images','synthetic/external.png','{external_url}',false,2)")
+        code, data = storage(client, "GET", "object/public/property-images/" + legacy_path)
+        if code != 200 or data != PNG:
+            raise AssertionError(f"legacy public bucket delivery failed: HTTP {code}")
+        if app_url:
+            code, html, _ = app_get(app_url, "/inmueble/" + slug)
+            page = html.decode("utf-8", errors="replace")
+            for expected in ("/api/property-images/" + image["id"], public_url, external_url):
+                if expected not in page:
+                    raise AssertionError("canonical page omitted one of three image source forms")
+            if code != 200:
+                raise AssertionError(f"canonical page failed: HTTP {code}")
+            code, _, _ = app_get(app_url, "/")
+            if code != 200:
+                raise AssertionError(f"Home failed: HTTP {code}")
         if master.sql("select count(*) from public.property_images where storage_bucket='property-images-private'") != "1":
             raise AssertionError("private metadata missing after publication")
-        print("PASS: isolated exact-path owner/other/anon matrix; private listing; owner-only finalization; published downloads; legacy bucket unchanged")
+        print("PASS: isolated exact-path owner/other/anon matrix; private listing; owner-only finalization; published downloads; synthetic legacy delivery")
+        if app_url:
+            print("PASS: local application draft preview/public delivery, canonical three-source rendering, Home")
     finally:
         # Reset to the same synthetic migration state with no users, properties
         # or Storage objects. Do not leave QA data in the shared lab.
