@@ -221,9 +221,10 @@ def run() -> None:
         if app_url:
             code, html, _ = app_get(app_url, "/inmueble/" + slug)
             page = html.decode("utf-8", errors="replace")
-            for expected in ("/api/property-images/" + image["id"], public_url, external_url):
+            for label, expected in (("private", "/api/property-images/" + image["id"]),
+                                    ("legacy public", public_url), ("legacy external", external_url)):
                 if expected not in page:
-                    raise AssertionError("canonical page omitted one of three image source forms")
+                    raise AssertionError(f"canonical page omitted {label} image source (HTTP {code})")
             if code != 200:
                 raise AssertionError(f"canonical page failed: HTTP {code}")
             code, _, _ = app_get(app_url, "/")
