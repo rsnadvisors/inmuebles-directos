@@ -12,6 +12,7 @@ import base64
 import os
 import pathlib
 import shutil
+import subprocess
 import sys
 import urllib.error
 import urllib.parse
@@ -71,6 +72,21 @@ def app_get(app_url: str, path: str, token: str | None = None) -> tuple[int, byt
             return response.status, response.read(), {key.lower(): value for key, value in response.headers.items()}
     except urllib.error.HTTPError as error:
         return error.code, error.read(), {key.lower(): value for key, value in error.headers.items()}
+
+
+def browser_smoke(app_url: str, slug: str, image_id: str, owner_token: str, mode: str) -> None:
+    script = os.environ.get("LOCAL_BROWSER_QA_SCRIPT")
+    if not script:
+        return
+    local.reject_remote_value("browser application URL", app_url)
+    browser_env = os.environ.copy()
+    browser_env["LOCAL_QA_OWNER_TOKEN"] = owner_token
+    browser_env["LOCAL_QA_IMAGE_ID"] = image_id
+    result = subprocess.run(["node", script, app_url, slug, mode],
+                            env=browser_env, capture_output=True, text=True, timeout=180)
+    if result.returncode != 0:
+        raise AssertionError("isolated browser smoke failed: " + result.stdout[-2000:] + result.stderr[-2000:])
+    print(result.stdout.strip())
 
 
 def expect_private_listing(client: local.LocalClient, path: str, token: str | None, visible: bool) -> None:
@@ -167,6 +183,7 @@ def run() -> None:
                             f"owner preview bytes/cache differ: length {len(body)}/{len(PNG)}, "
                             f"cache={cache!r}"
                         )
+            browser_smoke(app_url, slug, image["id"], owner["token"], "draft")
 
         for actor, label in ((None, "anon"), (other["token"], "other")):
             if rows(client, "property_images", {"id": "eq." + image["id"]}, actor):
@@ -230,6 +247,7 @@ def run() -> None:
             code, _, _ = app_get(app_url, "/")
             if code != 200:
                 raise AssertionError(f"Home failed: HTTP {code}")
+            browser_smoke(app_url, slug, image["id"], owner["token"], "published")
         if master.sql("select count(*) from public.property_images where storage_bucket='property-images-private'") != "1":
             raise AssertionError("private metadata missing after publication")
         print("PASS: isolated exact-path owner/other/anon matrix; private listing; owner-only finalization; published downloads; synthetic legacy delivery")
