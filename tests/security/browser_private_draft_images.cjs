@@ -72,7 +72,11 @@ async function main() {
         value: 'base64-' + Buffer.from(JSON.stringify(session)).toString('base64url'), url: base }]);
       response = await page.goto(base + '/publicar', { waitUntil: 'domcontentloaded' });
       assert.equal(response.status(), 200, `${label} publication form`);
-      await page.getByRole('heading', { name: 'Publica tu propiedad' }).waitFor();
+      try {
+        await page.getByRole('heading', { name: 'Publica tu propiedad' }).waitFor({ timeout: 8000 });
+      } catch {
+        throw new Error(`${label} /publicar did not render: URL=${page.url()} headings=${JSON.stringify(await page.locator('h1').allTextContents())}`);
+      }
       assert.equal(await page.locator('input[type="file"]').count(), 1);
       await context.close();
       console.log(`PASS: ${label} ${viewport.width}x${viewport.height} Home/card/drawer/gallery/canonical/OG/legacy image/publicar`);
