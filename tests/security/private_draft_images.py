@@ -160,8 +160,13 @@ def run() -> None:
                 code, body, headers = app_get(app_url, "/api/property-images/" + image["id"] + "/preview", token)
                 if code != expected:
                     raise AssertionError(f"draft preview returned HTTP {code}, expected {expected}")
-                if code == 200 and (body != PNG or headers.get("Cache-Control") != "private, no-store"):
-                    raise AssertionError("owner preview bytes or cache policy differ")
+                if code == 200:
+                    cache = headers.get("Cache-Control", "")
+                    if body != PNG or "no-store" not in cache or "private" not in cache:
+                        raise AssertionError(
+                            f"owner preview bytes/cache differ: length {len(body)}/{len(PNG)}, "
+                            f"cache={cache!r}"
+                        )
 
         for actor, label in ((None, "anon"), (other["token"], "other")):
             if rows(client, "property_images", {"id": "eq." + image["id"]}, actor):
