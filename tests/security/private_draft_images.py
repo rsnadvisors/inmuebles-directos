@@ -25,7 +25,8 @@ import profile_authorization as local
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-MIGRATION = ROOT / "supabase/migrations/20260926200632_private_draft_image_storage.sql"
+EXPAND = ROOT / "supabase/migrations/20260926200632_private_draft_image_storage_expand.sql"
+CONTRACT = ROOT / "supabase/migrations/20260927153000_private_draft_image_storage_contract.sql"
 PNG = bytes.fromhex(
     "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
     "0000000b49444154789c636000020000050001a5f645400000000049454e44ae426082"
@@ -115,10 +116,13 @@ def expect_private_listing(client: local.LocalClient, path: str, token: str | No
 
 def run() -> None:
     local.assert_static_target_safety(ROOT)
-    if not MIGRATION.is_file():
-        raise AssertionError("versioned private-image migration missing")
+    phase = os.environ.get("PRIVATE_DRAFT_PHASE", "B")
+    if phase not in ("A", "B") or not EXPAND.is_file() or not CONTRACT.is_file():
+        raise AssertionError("invalid phase or versioned private-image migration missing")
     root = master.prepare()
-    shutil.copy2(MIGRATION, root / "supabase/migrations" / MIGRATION.name)
+    shutil.copy2(EXPAND, root / "supabase/migrations" / EXPAND.name)
+    if phase == "B":
+        shutil.copy2(CONTRACT, root / "supabase/migrations" / CONTRACT.name)
     local.assert_static_target_safety(root)
     try:
         local.reset_local_database(root)
@@ -130,9 +134,10 @@ def run() -> None:
             raise AssertionError("new bucket is not private")
         if master.sql("select public from storage.buckets where id='property-images'") != "t":
             raise AssertionError("legacy public bucket changed")
-        if master.sql("select count(*) from pg_policies where schemaname='storage' and tablename='objects' "
-                      "and policyname='owners upload own property images'") != "0":
-            raise AssertionError("old public draft upload policy survived")
+        legacy_policy_count = master.sql("select count(*) from pg_policies where schemaname='storage' "
+                                         "and tablename='objects' and policyname='owners upload own property images'")
+        if legacy_policy_count != ("1" if phase == "A" else "0"):
+            raise AssertionError("legacy public upload policy differs from phase")
 
         owner = client.signup("draft-owner", {"full_name": "Synthetic Owner"})
         other = client.signup("draft-other", {"full_name": "Synthetic Other"})
@@ -148,7 +153,7 @@ def run() -> None:
         if created not in (200, 201):
             raise AssertionError(f"owner draft creation failed: HTTP {created}")
         property_id = rows(client, "properties", {"slug": "eq." + slug}, owner["token"])[0]["id"]
-        without_image, _ = client.request("POST", "/rest/v1/rpc/finalize_own_property_publication",
+        without_image, _ = client.request("POST", "/rest/v1/rpc/finalize_private_property_publication",
                                           token=owner["token"], payload={"p_property_id": property_id})
         if without_image < 400:
             raise AssertionError("owner finalized a draft without an image")
@@ -163,9 +168,10 @@ def run() -> None:
             code, _ = storage(client, "POST", upload_suffix, actor, PNG, "image/png")
             if code < 400:
                 raise AssertionError(f"{label} uploaded to owner private path")
-        code, _ = storage(client, "POST", public_upload, owner["token"], PNG, "image/png")
-        if code < 400:
-            raise AssertionError("owner uploaded draft bytes to legacy public bucket")
+        if phase == "B":
+            code, _ = storage(client, "POST", public_upload, owner["token"], PNG, "image/png")
+            if code < 400:
+                raise AssertionError("owner uploaded draft bytes to legacy public bucket")
         code, _ = storage(client, "POST", upload_suffix, owner["token"], PNG, "image/png")
         if code not in (200, 201):
             raise AssertionError(f"owner private upload failed: HTTP {code}")
@@ -204,7 +210,7 @@ def run() -> None:
             if code < 400:
                 raise AssertionError(f"{label} downloaded exact private draft path")
             expect_private_listing(client, path, actor, False)
-            finalized, _ = client.request("POST", "/rest/v1/rpc/finalize_own_property_publication",
+            finalized, _ = client.request("POST", "/rest/v1/rpc/finalize_private_property_publication",
                                           token=actor, payload={"p_property_id": property_id})
             if finalized < 400:
                 raise AssertionError(f"{label} finalized owner draft")
@@ -212,7 +218,7 @@ def run() -> None:
         if code != 200 or data != PNG:
             raise AssertionError(f"owner exact-path private draft download failed: HTTP {code}")
         expect_private_listing(client, path, owner["token"], True)
-        published, published_slug = client.request("POST", "/rest/v1/rpc/finalize_own_property_publication",
+        published, published_slug = client.request("POST", "/rest/v1/rpc/finalize_private_property_publication",
                                                    token=owner["token"], payload={"p_property_id": property_id})
         if published != 200 or published_slug != slug:
             raise AssertionError(f"owner finalization failed: HTTP {published}")

@@ -75,7 +75,7 @@ export async function POST(request: Request): Promise<Response> {
       if (index === 0) primaryImageId = image.data.id;
     }
     stage = "finalize";
-    const finalized = await supabase.rpc("finalize_own_property_publication", { p_property_id: property.id });
+    const finalized = await supabase.rpc("finalize_private_property_publication", { p_property_id: property.id });
     if (finalized.error || finalized.data !== slug) throw new Error("Finalization failed");
     stage = "delivery";
     if (!await deliveryAvailable(primaryImageId)) throw new Error("Published image delivery unconfirmed");

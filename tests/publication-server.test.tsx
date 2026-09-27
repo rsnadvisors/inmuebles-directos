@@ -123,7 +123,7 @@ describe("publication server: draft then controlled finalization", () => {
     expect(mock.storageFrom).toHaveBeenCalledWith("property-images-private");
     expect(mock.url).not.toHaveBeenCalled();
     expect(mock.image.mock.calls[0][0]).toMatchObject({ storage_bucket: "property-images-private", public_url: null });
-    expect(mock.finalize).toHaveBeenCalledWith("finalize_own_property_publication", { p_property_id: "fixture-id" });
+    expect(mock.finalize).toHaveBeenCalledWith("finalize_private_property_publication", { p_property_id: "fixture-id" });
   });
   it("accepts five max-size photos and uses canonical names, ordering and cover", async () => {
     const data = form(); data.delete("images");

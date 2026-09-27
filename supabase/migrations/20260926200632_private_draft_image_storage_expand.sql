@@ -45,12 +45,9 @@ insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_typ
 values ('property-images-private', 'property-images-private', false, 5242880,
         array['image/jpeg','image/png','image/webp']::text[]);
 
--- A public bucket bypasses SELECT RLS for object downloads. End ordinary draft
--- uploads there; keep its current published legacy bytes and URLs untouched.
-drop policy "owners upload own property images" on storage.objects;
-drop policy "agents upload managed property images" on storage.objects;
-drop policy "owners inspect unfinished property image objects" on storage.objects;
-drop policy "owners discard unfinished property image objects" on storage.objects;
+-- EXPAND: retain every existing legacy policy and the original finalization
+-- RPC while the old application remains deployed. These permissions already
+-- exist in production; the private path below adds no access to that bucket.
 
 create policy "owners upload private draft property images" on storage.objects
   for insert to authenticated with check (
@@ -63,17 +60,13 @@ create policy "owners upload private draft property images" on storage.objects
   );
 -- Agents retain their managed-property upload ability, but a draft can only
 -- receive private bytes. Published legacy uploads may continue in the old bucket.
-create policy "agents upload managed property images" on storage.objects
+create policy "agents upload private managed property images" on storage.objects
   for insert to authenticated with check (
     private.is_agent()
-    and ((bucket_id='property-images-private' and exists (
+    and bucket_id='property-images-private' and exists (
              select 1 from public.properties p where p.id::text=(storage.foldername(name))[2]
                and p.status='draft'
-               and (p.agent_id=(select auth.uid()) or p.owner_id=(select auth.uid()) or private.is_admin())))
-      or (bucket_id='property-images' and exists (
-             select 1 from public.properties p where p.id::text=(storage.foldername(name))[2]
-               and p.status='published'
-               and (p.agent_id=(select auth.uid()) or p.owner_id=(select auth.uid()) or private.is_admin()))))
+               and (p.agent_id=(select auth.uid()) or p.owner_id=(select auth.uid()) or private.is_admin()))
     and (storage.foldername(name))[1]=(select auth.uid())::text
     and lower(metadata->>'mimetype') in ('image/jpeg','image/png','image/webp')
   );
@@ -109,33 +102,9 @@ create policy "published private property images are readable" on storage.object
         and storage.objects.owner_id=p.owner_id::text)
   );
 
-drop policy "owners add own property images" on public.property_images;
-create policy "owners add own property images" on public.property_images
-  for insert to authenticated with check (
-    storage_bucket='property-images-private' and public_url is null
-    and storage_path like (select auth.uid())::text || '/' || property_id::text || '/%'
-    and exists (select 1 from public.properties p where p.id=property_id
-      and p.owner_id=(select auth.uid()) and p.status='draft' and p.agent_id is null)
-  );
--- The pre-existing agent ALL policy is permissive. This restrictive policy
--- prevents it from attaching public-bucket metadata to any draft.
-create policy "draft metadata requires private storage" on public.property_images
-  as restrictive for insert to authenticated with check (
-    not exists (select 1 from public.properties p where p.id=property_id and p.status='draft')
-    or (storage_bucket='property-images-private' and public_url is null
-        and storage_path like (select auth.uid())::text || '/' || property_id::text || '/%')
-  );
-create policy "draft metadata updates stay private" on public.property_images
-  as restrictive for update to authenticated
-  using (true)
-  with check (
-    not exists (select 1 from public.properties p where p.id=property_id and p.status='draft')
-    or (storage_bucket='property-images-private' and public_url is null)
-  );
-
--- Keep all established field/owner checks, replacing only the image-source
--- validation. The transition and storage metadata are checked in one DB txn.
-create or replace function public.finalize_own_property_publication(p_property_id uuid)
+-- A distinct RPC lets new code enforce private images without changing the
+-- legacy RPC consumed by the still-running production application.
+create function public.finalize_private_property_publication(p_property_id uuid)
 returns text language plpgsql security definer set search_path = '' as $finalize$
 declare
   v_user uuid := auth.uid();
@@ -195,8 +164,8 @@ begin
   return v_property.slug;
 end;
 $finalize$;
-revoke all on function public.finalize_own_property_publication(uuid) from public, anon;
-grant execute on function public.finalize_own_property_publication(uuid) to authenticated;
+revoke all on function public.finalize_private_property_publication(uuid) from public, anon;
+grant execute on function public.finalize_private_property_publication(uuid) to authenticated;
 
 notify pgrst, 'reload schema';
 commit;
