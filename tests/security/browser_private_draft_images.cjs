@@ -56,6 +56,7 @@ async function main() {
       await page.waitForURL(`**/inmueble/${slug}`);
       assert.equal(await page.locator('.property-full-main-image img').getAttribute('src'),
         `/api/property-images/${imageId}`, `${label} canonical cover`);
+      await page.locator('meta[property="og:image"]').waitFor({ state: 'attached', timeout: 10000 });
       assert.equal(await page.locator('meta[property="og:image"]').count(), 1,
         `${label} Open Graph image`);
       await page.getByRole('button', { name: 'Imagen siguiente' }).click();
