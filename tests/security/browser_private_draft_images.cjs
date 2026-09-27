@@ -31,7 +31,7 @@ async function main() {
     }
     for (const [label, viewport] of [['desktop', { width: 1440, height: 900 }],
                                       ['mobile', { width: 375, height: 812 }]]) {
-      const context = await browser.newContext({ viewportSize: viewport });
+      const context = await browser.newContext({ viewport });
       const page = await context.newPage();
       page.on('pageerror', error => failures.push(`${label}: ${error.message}`));
       let response = await page.goto(base + '/', { waitUntil: 'domcontentloaded' });
