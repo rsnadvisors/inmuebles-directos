@@ -65,6 +65,11 @@ async function main() {
         `${label} legacy public image`);
       const overflows = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2);
       assert.equal(overflows, false, `${label} horizontal overflow`);
+      const session = { access_token: token, refresh_token: 'synthetic-unused',
+        token_type: 'bearer', expires_at: Math.floor(Date.now() / 1000) + 3600,
+        expires_in: 3600 };
+      await context.addCookies([{ name: 'sb-127-auth-token',
+        value: 'base64-' + Buffer.from(JSON.stringify(session)).toString('base64url'), url: base }]);
       response = await page.goto(base + '/publicar', { waitUntil: 'domcontentloaded' });
       assert.equal(response.status(), 200, `${label} publication form`);
       await page.getByRole('heading', { name: 'Publica tu propiedad' }).waitFor();
