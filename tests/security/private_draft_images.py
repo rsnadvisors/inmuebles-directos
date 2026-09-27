@@ -68,9 +68,9 @@ def app_get(app_url: str, path: str, token: str | None = None) -> tuple[int, byt
     request = urllib.request.Request(app_url.rstrip("/") + path, headers=headers)
     try:
         with urllib.request.urlopen(request, timeout=30) as response:
-            return response.status, response.read(), dict(response.headers)
+            return response.status, response.read(), {key.lower(): value for key, value in response.headers.items()}
     except urllib.error.HTTPError as error:
-        return error.code, error.read(), dict(error.headers)
+        return error.code, error.read(), {key.lower(): value for key, value in error.headers.items()}
 
 
 def expect_private_listing(client: local.LocalClient, path: str, token: str | None, visible: bool) -> None:
@@ -161,7 +161,7 @@ def run() -> None:
                 if code != expected:
                     raise AssertionError(f"draft preview returned HTTP {code}, expected {expected}")
                 if code == 200:
-                    cache = headers.get("Cache-Control", "")
+                    cache = headers.get("cache-control", "")
                     if body != PNG or "no-store" not in cache or "private" not in cache:
                         raise AssertionError(
                             f"owner preview bytes/cache differ: length {len(body)}/{len(PNG)}, "
@@ -195,7 +195,7 @@ def run() -> None:
                 raise AssertionError(f"{label} cannot download published private-backed image: HTTP {code}")
             if app_url:
                 code, body, headers = app_get(app_url, "/api/property-images/" + image["id"], actor)
-                if code != 200 or body != PNG or headers.get("Cache-Control") != "no-store":
+                if code != 200 or body != PNG or "no-store" not in headers.get("cache-control", ""):
                     raise AssertionError(f"{label} application delivery failed: HTTP {code}")
         # Local service credentials are used only to construct a synthetic
         # legacy object; the application never receives this credential.
