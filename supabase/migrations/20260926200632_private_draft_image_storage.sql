@@ -98,6 +98,9 @@ create policy "owners discard private draft image objects" on storage.objects
 create policy "published private property images are readable" on storage.objects
   for select to anon, authenticated using (
     bucket_id='property-images-private'
+    -- SELECT also powers listing. Permit only an exact authenticated-object
+    -- download; anonymous callers must never enumerate the private bucket.
+    and storage.allow_only_operation('object.get_authenticated')
     and exists (select 1 from public.property_images i
       join public.properties p on p.id=i.property_id
       where i.storage_bucket='property-images-private' and i.storage_path=name

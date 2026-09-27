@@ -1,5 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { PRIVATE_PROPERTY_IMAGE_BUCKET, validImageId } from "./property-image-source";
+import { PRIVATE_PROPERTY_IMAGE_BUCKET, privateImageMime, validImageId } from "./property-image-source";
 
 const IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 export { PRIVATE_PROPERTY_IMAGE_BUCKET, validImageId } from "./property-image-source";
@@ -16,12 +16,15 @@ export async function loadPublishedPrivateImage(client: SupabaseClient, imageId:
     .eq("id", imageId).eq("storage_bucket", PRIVATE_PROPERTY_IMAGE_BUCKET).maybeSingle();
   if (image.error) throw new Error("Image metadata unavailable");
   if (!image.data) return null;
-  const property = await client.from("properties").select("id").eq("id", image.data.property_id)
+  const property = await client.from("properties").select("id,owner_id,status").eq("id", image.data.property_id)
     .eq("status", "published").maybeSingle();
   if (property.error) throw new Error("Property status unavailable");
   if (!property.data) return null;
+  const expectedMime = privateImageMime(image.data, property.data);
+  if (!expectedMime) return null;
   const downloaded = await client.storage.from(PRIVATE_PROPERTY_IMAGE_BUCKET).download(image.data.storage_path);
-  if (downloaded.error || !downloaded.data || !IMAGE_TYPES.has(downloaded.data.type)) {
+  if (downloaded.error || !downloaded.data || !IMAGE_TYPES.has(downloaded.data.type)
+      || downloaded.data.type !== expectedMime) {
     throw new Error("Published image unavailable");
   }
   return downloaded.data;

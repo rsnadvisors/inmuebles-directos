@@ -94,15 +94,23 @@ def expect_private_listing(client: local.LocalClient, path: str, token: str | No
                            json.dumps({"prefix": "", "limit": 100}).encode())
     if status not in (200, 400, 401, 403):
         raise AssertionError(f"private listing unexpected HTTP {status}")
+    if visible and status != 200:
+        raise AssertionError("owner cannot list own private draft folder")
     if status == 200:
         encoded = data.decode("utf-8", errors="replace")
         # A bucket-root listing can return only the owner prefix. Check the
         # precise property folder too, without treating listing as the proof.
-        _, data = storage(client, "POST", "object/list/property-images-private", token,
-                          json.dumps({"prefix": "/".join(path.split("/")[:2]), "limit": 100}).encode())
-        encoded += data.decode("utf-8", errors="replace")
-        if (path.split("/")[-1] in encoded) != visible:
+        folder_status, data = storage(client, "POST", "object/list/property-images-private", token,
+                                      json.dumps({"prefix": "/".join(path.split("/")[:2]), "limit": 100}).encode())
+        if folder_status not in (200, 400, 401, 403):
+            raise AssertionError(f"private folder listing unexpected HTTP {folder_status}")
+        if folder_status == 200:
+            encoded += data.decode("utf-8", errors="replace")
+        if visible and path.split("/")[-1] not in encoded:
             raise AssertionError("private object listing did not match role")
+        if not visible and any(segment in encoded for segment in
+                               (path, path.split("/")[0], path.split("/")[1], path.split("/")[2])):
+            raise AssertionError("private object path or filename exposed in listing")
 
 
 def run() -> None:
@@ -140,6 +148,10 @@ def run() -> None:
         if created not in (200, 201):
             raise AssertionError(f"owner draft creation failed: HTTP {created}")
         property_id = rows(client, "properties", {"slug": "eq." + slug}, owner["token"])[0]["id"]
+        without_image, _ = client.request("POST", "/rest/v1/rpc/finalize_own_property_publication",
+                                          token=owner["token"], payload={"p_property_id": property_id})
+        if without_image < 400:
+            raise AssertionError("owner finalized a draft without an image")
         path = f"{owner['id']}/{property_id}/{uuid.uuid4()}.png"
         image_suffix = "object/authenticated/property-images-private/" + path
         upload_suffix = "object/property-images-private/" + path
@@ -214,6 +226,14 @@ def run() -> None:
                 code, body, headers = app_get(app_url, "/api/property-images/" + image["id"], actor)
                 if code != 200 or body != PNG or "no-store" not in headers.get("cache-control", ""):
                     raise AssertionError(f"{label} application delivery failed: HTTP {code}")
+        expect_private_listing(client, path, None, False)
+        expect_private_listing(client, path, other["token"], False)
+        if app_url:
+            for token, expected in ((None, 401), (owner["token"], 404), (other["token"], 404)):
+                code, _, _ = app_get(app_url, "/api/property-images/" + image["id"] + "/preview", token)
+                if code != expected:
+                    raise AssertionError(f"published image draft preview returned HTTP {code}, expected {expected}")
+        print("PASS: published private image remains directly downloadable, but anon/other listing exposes no path")
         # Local service credentials are used only to construct a synthetic
         # legacy object; the application never receives this credential.
         local_status = json.loads(local.run([
@@ -258,6 +278,11 @@ def run() -> None:
         # or Storage objects. Do not leave QA data in the shared lab.
         try:
             local.reset_local_database(root)
+            if master.sql("select count(*) from auth.users") != "0" or \
+               master.sql("select count(*) from public.properties") != "0" or \
+               master.sql("select count(*) from public.property_images") != "0" or \
+               master.sql("select count(*) from storage.objects where bucket_id in ('property-images', 'property-images-private')") != "0":
+                raise AssertionError("isolated lab cleanup left synthetic data")
             print("CLEANUP: isolated lab rebuilt with zero synthetic users and properties")
         finally:
             shutil.rmtree(root)

@@ -1,11 +1,13 @@
 // @vitest-environment node
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { resolvePropertyImage } from "../app/lib/property-image-source";
+import { privateImageMime, resolvePropertyImage } from "../app/lib/property-image-source";
 import { GET as publicImage } from "../app/api/property-images/[imageId]/route";
 import { GET as draftPreview } from "../app/api/property-images/[imageId]/preview/route";
 
 const ID = "11111111-1111-4111-8111-111111111111";
 const PROPERTY = "22222222-2222-4222-8222-222222222222";
+const OWNER = "33333333-3333-4333-8333-333333333333";
+const OBJECT = "44444444-4444-4444-8444-444444444444";
 const mock = vi.hoisted(() => ({ anon: vi.fn(), publicLoad: vi.fn(), auth: vi.fn() }));
 vi.mock("../app/lib/property-images", () => ({
   PRIVATE_PROPERTY_IMAGE_BUCKET: "property-images-private",
@@ -51,6 +53,34 @@ describe("dual image source", () => {
   });
 });
 
+describe("canonical private image path", () => {
+  const image = { property_id: PROPERTY, storage_bucket: "property-images-private", storage_path: `${OWNER}/${PROPERTY}/${OBJECT}.png` };
+  const property = { id: PROPERTY, owner_id: OWNER, status: "published" };
+  it("accepts only the exact linked owner/property/object path and canonical extension", () => {
+    expect(privateImageMime(image, property)).toBe("image/png");
+    expect(privateImageMime({ ...image, storage_path: `${OWNER}/${PROPERTY}/${OBJECT}.jpg` }, property)).toBe("image/jpeg");
+    expect(privateImageMime({ ...image, storage_path: `${OWNER}/${PROPERTY}/${OBJECT}.webp` }, property)).toBe("image/webp");
+  });
+  it.each([
+    ["wrong owner", { storage_path: `${ID}/${PROPERTY}/${OBJECT}.png` }, {}],
+    ["wrong property", { storage_path: `${OWNER}/${ID}/${OBJECT}.png` }, {}],
+    ["wrong bucket", { storage_bucket: "property-images" }, {}],
+    ["missing owner", {}, { owner_id: null }],
+    ["missing property", {}, { id: null }],
+    ["cross-linked property", { property_id: ID }, {}],
+    ["draft", {}, { status: "draft" }],
+    ["extra segment", { storage_path: `${OWNER}/${PROPERTY}/extra/${OBJECT}.png` }, {}],
+    ["empty segment", { storage_path: `${OWNER}//${OBJECT}.png` }, {}],
+    ["dot segment", { storage_path: `${OWNER}/${PROPERTY}/.` }, {}],
+    ["dot-dot segment", { storage_path: `${OWNER}/${PROPERTY}/..` }, {}],
+    ["non-UUID object", { storage_path: `${OWNER}/${PROPERTY}/photo.png` }, {}],
+    ["unsupported extension", { storage_path: `${OWNER}/${PROPERTY}/${OBJECT}.svg` }, {}],
+    ["uppercase extension", { storage_path: `${OWNER}/${PROPERTY}/${OBJECT}.PNG` }, {}],
+  ])("rejects %s", (_label, imageChange, propertyChange) => {
+    expect(privateImageMime({ ...image, ...imageChange }, { ...property, ...propertyChange })).toBeNull();
+  });
+});
+
 describe("public image delivery", () => {
   it("returns a published image with no-store and correct MIME", async () => {
     const response = await publicImage(new Request("http://localhost/image"), context());
@@ -93,5 +123,11 @@ describe("authenticated draft preview", () => {
     const response = await draftPreview(new Request("http://localhost/preview"), context());
     expect(response.status).toBe(404);
     expect(other.download).not.toHaveBeenCalled();
+  });
+  it("does not keep the draft preview available after publication", async () => {
+    const owner = authClient("owner", "published");
+    mock.auth.mockResolvedValue({ client: owner.client, user: { id: "owner" } });
+    expect((await draftPreview(new Request("http://localhost/preview"), context())).status).toBe(404);
+    expect(owner.download).not.toHaveBeenCalled();
   });
 });

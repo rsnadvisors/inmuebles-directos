@@ -19,6 +19,11 @@ only in a separately authorized rollout with verified backup and recovery.
   still-private object under Storage RLS. It never uses `service_role` or a
   stored signed URL. The same stable route supplies cards, drawer, full page
   and absolute Open Graph image metadata.
+- The published-object Storage `SELECT` policy permits only the exact
+  authenticated-object download operation. Anonymous clients can download a
+  published image by path but cannot list the private bucket. The delivery
+  route also validates the private bucket, linked property/owner IDs, and the
+  canonical three-segment UUID image path before fetching bytes.
 
 Both routes send `Cache-Control: no-store`; the draft preview additionally
 sends `private`. This deliberately trades CDN caching for the guarantee that
