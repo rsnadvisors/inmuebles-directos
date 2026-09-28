@@ -8,6 +8,7 @@ Only synthetic lab users and images are created. Every scenario resets the lab.
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import os
 import pathlib
@@ -25,6 +26,7 @@ import private_draft_images as private
 import profile_authorization as local
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
+HISTORICAL = ROOT / "tests/security/fixtures/20260909040437_remote_history_TEST_ONLY.sql"
 
 
 def publish(app_url: str, token: str) -> tuple[int, dict]:
@@ -143,44 +145,94 @@ def run_scenario(app_url: str, app: str, phase: str) -> None:
 
 
 def contract_precondition() -> None:
-    """An unfinished legacy draft must abort Contract with zero policy changes."""
+    """Every in-flight draft shape must abort Contract without partial lockdown."""
     root = master.prepare()
     try:
         shutil.copy2(private.EXPAND, root / "supabase/migrations" / private.EXPAND.name)
+        migration = root / "supabase/migrations" / private.CONTRACT.name
+        for shape in ("zero-image", "object-only", "metadata-only", "full", "multiple"):
+            local.reset_local_database(root)
+            status = local.local_status(root)
+            client = local.LocalClient(status["api_url"], status["anon_key"])
+            owner = client.signup("contract-" + uuid.uuid4().hex[:8], {"full_name": "Synthetic Owner"})
+            client.profile(owner)
+
+            def draft() -> tuple[str, str]:
+                slug = "synthetic-pending-" + uuid.uuid4().hex
+                created, _ = client.request("POST", "/rest/v1/properties", token=owner["token"],
+                    payload={"title": "Synthetic pending", "slug": slug, "listing_type": "sale",
+                             "property_type": "house", "status": "draft", "price": 100,
+                             "currency": "PEN", "lat": -5, "lng": -80, "owner_id": owner["id"]})
+                if created not in (200, 201):
+                    raise AssertionError("negative fixture draft creation failed")
+                property_id = private.rows(client, "properties", {"slug": "eq." + slug}, owner["token"])[0]["id"]
+                return property_id, f"{owner['id']}/{property_id}/{uuid.uuid4()}.png"
+
+            property_id, path = draft()
+            if shape == "multiple":
+                second_id, second_path = draft()
+                add_legacy_image(client, owner["token"], second_id, second_path, True, True)
+            if shape in ("object-only", "full"):
+                add_legacy_image(client, owner["token"], property_id, path, True, False)
+            if shape in ("metadata-only", "full"):
+                add_legacy_image(client, owner["token"], property_id, path, False, True)
+            if shape == "zero-image":
+                if master.sql("select (select count(*) from public.property_images where property_id='"
+                              + property_id + "'),(select count(*) from storage.objects where bucket_id="
+                              "'property-images' and name like '%/" + property_id + "/%')") != "0|0":
+                    raise AssertionError("zero-image race was not reproduced")
+                # This is the exact predicate used by the original Contract.
+                if master.sql("select exists (select 1 from public.property_images i join "
+                              "public.properties p on p.id=i.property_id where p.status='draft' "
+                              "and i.storage_bucket='property-images') or exists "
+                              "(select 1 from storage.objects o join public.properties p "
+                              "on p.id::text=(storage.foldername(o.name))[2] where "
+                              "o.bucket_id='property-images' and p.status='draft')") != "f":
+                    raise AssertionError("original zero-image preflight unexpectedly detected the draft")
+                print("PASS old Contract reproduction: draft exists, images=0, objects=0, old predicate=false")
+
+            before = contract_state()
+            shutil.copy2(private.CONTRACT, migration)
+            attempt = subprocess.run(["supabase", "migration", "up", "--local",
+                "--workdir", str(root)], text=True, capture_output=True, timeout=90)
+            if attempt.returncode == 0 or "unsafe legacy drafts exist" not in attempt.stderr + attempt.stdout:
+                raise AssertionError("Contract did not reject " + shape + ": " + attempt.stderr[-400:])
+            after = contract_state()
+            if after != before:
+                raise AssertionError("rejected Contract changed policy, grant, RPC, bucket or migration history")
+            if master.sql("select has_function_privilege('authenticated',"
+                          "'public.finalize_own_property_publication(uuid)','EXECUTE')") != "t":
+                raise AssertionError("rejected Contract revoked old RPC")
+            print("PASS Contract rejects " + shape + ": catalogs and migration history unchanged")
+            if shape == "zero-image" and os.environ.get("OLD_APP_URL"):
+                old_url = os.environ["OLD_APP_URL"]
+                local.reject_remote_value("old application URL", old_url)
+                http, result = publish(old_url, owner["token"])
+                if http != 200 or result.get("status") != "published":
+                    raise AssertionError("R5 failed: old publisher cannot complete after rejected Contract")
+                print("PASS R5: old application still publishes after rejected Contract")
+            migration.unlink()
+
+        # The failed attempt is retryable: remove only synthetic users/data by
+        # resetting the disposable lab, then apply Contract exactly once.
         local.reset_local_database(root)
-        status = local.local_status(root)
-        client = local.LocalClient(status["api_url"], status["anon_key"])
-        owner = client.signup("contract-" + uuid.uuid4().hex[:8], {"full_name": "Synthetic Owner"})
-        client.profile(owner)
-        slug = "synthetic-pending-" + uuid.uuid4().hex
-        created, _ = client.request("POST", "/rest/v1/properties", token=owner["token"],
-            payload={"title": "Synthetic pending", "slug": slug, "listing_type": "sale",
-                     "property_type": "house", "status": "draft", "price": 100,
-                     "currency": "PEN", "lat": -5, "lng": -80, "owner_id": owner["id"]})
-        if created not in (200, 201):
-            raise AssertionError("negative fixture draft creation failed")
-        property_id = private.rows(client, "properties", {"slug": "eq." + slug}, owner["token"])[0]["id"]
-        path = f"{owner['id']}/{property_id}/{uuid.uuid4()}.png"
-        code, _ = private.storage(client, "POST", "object/property-images/" + path,
-                                  owner["token"], private.PNG, "image/png")
-        if code not in (200, 201):
-            raise AssertionError("negative fixture legacy upload failed")
-        metadata, _ = client.request("POST", "/rest/v1/property_images", token=owner["token"],
-            payload={"property_id": property_id, "storage_path": path,
-                     "public_url": client.api_url + "/storage/v1/object/public/property-images/" + path})
-        if metadata not in (200, 201):
-            raise AssertionError("negative fixture legacy metadata failed")
-        attempt = subprocess.run(["docker", "exec", "-i", local.db_container(), "psql",
-            "-v", "ON_ERROR_STOP=1", "-U", "postgres", "-d", "postgres", "-Atq"],
-            input=private.CONTRACT.read_text(), text=True, capture_output=True, timeout=30)
-        if attempt.returncode == 0 or "unfinished legacy draft exists" not in attempt.stderr:
-            raise AssertionError("Contract did not fail closed on unfinished legacy draft")
-        if master.sql("select count(*) from pg_policies where schemaname='storage' and "
-                      "tablename='objects' and policyname='owners upload own property images'") != "1":
-            raise AssertionError("failed Contract partially changed policies")
-        if len(private.rows(client, "property_images", {"property_id": "eq." + property_id}, owner["token"])) != 1:
-            raise AssertionError("failed Contract changed legacy metadata")
-        print("PASS Contract precondition: unfinished legacy draft aborts with zero partial mutation")
+        if master.sql("select count(*) from public.properties where status='draft'") != "0":
+            raise AssertionError("unsafe fixture survived local cleanup")
+        shutil.copy2(private.CONTRACT, migration)
+        applied = subprocess.run(["supabase", "migration", "up", "--local",
+            "--workdir", str(root)], text=True, capture_output=True, timeout=90)
+        if applied.returncode != 0:
+            raise AssertionError("Contract failed after fixture cleanup: " + applied.stderr[-400:])
+        if master.sql("select count(*) from supabase_migrations.schema_migrations "
+                      "where version='20260927153000'") != "1":
+            raise AssertionError("successful Contract was not recorded exactly once")
+        again = subprocess.run(["supabase", "migration", "up", "--local",
+            "--workdir", str(root)], text=True, capture_output=True, timeout=90)
+        if again.returncode != 0 or master.sql(
+                "select count(*) from supabase_migrations.schema_migrations "
+                "where version='20260927153000'") != "1":
+            raise AssertionError("Contract reattempt was not idempotent")
+        print("PASS Contract after cleanup: A retained, B applied once, second up no-op")
     finally:
         try:
             local.reset_local_database(root)
@@ -192,22 +244,167 @@ def contract_precondition() -> None:
             shutil.rmtree(root)
 
 
+def add_legacy_image(client: local.LocalClient, token: str, property_id: str, path: str,
+                     object_present: bool, metadata_present: bool) -> None:
+    if object_present:
+        code, _ = private.storage(client, "POST", "object/property-images/" + path,
+                                  token, private.PNG, "image/png")
+        if code not in (200, 201):
+            raise AssertionError("negative fixture legacy upload failed")
+    if metadata_present:
+        code, _ = client.request("POST", "/rest/v1/property_images", token=token,
+            payload={"property_id": property_id, "storage_path": path,
+                     "public_url": client.api_url + "/storage/v1/object/public/property-images/" + path})
+        if code not in (200, 201):
+            raise AssertionError("negative fixture legacy metadata failed")
+
+
+def contract_state() -> str:
+    """Stable catalog fingerprint, including rollback-relevant permissions."""
+    return master.sql("""
+      select jsonb_build_object(
+        'policies', (select coalesce(jsonb_agg(to_jsonb(p) order by p.schemaname,p.tablename,p.policyname),
+          '[]'::jsonb) from pg_policies p where
+          (p.schemaname='storage' and p.tablename='objects') or
+          (p.schemaname='public' and p.tablename='property_images')),
+        'table_grants', (select coalesce(jsonb_agg(to_jsonb(g) order by g.table_schema,g.table_name,
+          g.grantee,g.privilege_type),'[]'::jsonb) from information_schema.role_table_grants g
+          where (g.table_schema='storage' and g.table_name='objects') or
+                (g.table_schema='public' and g.table_name in ('properties','property_images'))),
+        'rpc_acls', (select coalesce(jsonb_agg(
+          jsonb_build_object('name',p.proname,'acl',p.proacl) order by p.proname),'[]'::jsonb)
+          from pg_proc p where p.oid in (
+            'public.finalize_own_property_publication(uuid)'::regprocedure,
+            'public.finalize_private_property_publication(uuid)'::regprocedure)),
+        'buckets', (select coalesce(jsonb_agg(to_jsonb(b) order by b.id),'[]'::jsonb)
+          from storage.buckets b where id in ('property-images','property-images-private')),
+        'history', (select coalesce(jsonb_agg(version order by version),'[]'::jsonb)
+          from supabase_migrations.schema_migrations)
+      )::text
+    """)
+
+
+def old_contract_lockdown(old_url: str) -> None:
+    """The immutable old publisher must fail after Contract closes its path."""
+    root = master.prepare()
+    try:
+        for migration in (private.EXPAND, private.CONTRACT):
+            shutil.copy2(migration, root / "supabase/migrations" / migration.name)
+        local.reset_local_database(root)
+        status = local.local_status(root)
+        client = local.LocalClient(status["api_url"], status["anon_key"])
+        owner = client.signup("old-contract-" + uuid.uuid4().hex[:8],
+                              {"full_name": "Synthetic Owner"})
+        client.profile(owner)
+        http, result = publish(old_url, owner["token"])
+        if http < 400 or result.get("ok") or result.get("status") == "published":
+            raise AssertionError("old publisher unexpectedly completed after Contract")
+        if master.sql("select count(*) from public.properties where status='published'") != "0":
+            raise AssertionError("old publisher left a published row after Contract")
+        print(f"PASS old+B: publication rejected at legacy upload (HTTP {http})")
+    finally:
+        try:
+            local.reset_local_database(root)
+            if master.sql("select (select count(*) from auth.users), "
+                          "(select count(*) from public.properties), "
+                          "(select count(*) from public.property_images), "
+                          "(select count(*) from storage.objects where bucket_id in "
+                          "('property-images','property-images-private'))") != "0|0|0|0":
+                raise AssertionError("old+B synthetic cleanup incomplete")
+        finally:
+            shutil.rmtree(root)
+
+
+def selective_migration_rehearsal() -> None:
+    """Prove A and B are the sole pending files in an unlinked local workspace."""
+    root = master.prepare()
+    historical_copy = root / "supabase/migrations/20260909040437_remote_history.sql"
+    try:
+        local.reset_local_database(root)
+        local.assert_static_target_safety(root)
+        if hashlib.md5(HISTORICAL.read_bytes().rstrip(b"\n")).hexdigest() != (
+                "c92a8fc9c03fcdd0dfa20a442c628232"):
+            raise AssertionError("historical SQL fixture differs from production migration history")
+        # Production has this older remote-only version. Model only its history
+        # in the disposable local database. The file is an exact read-only
+        # capture of its stored statement, never invented or executed here.
+        master.sql("insert into supabase_migrations.schema_migrations(version,name) "
+                   "values ('20260909040437','historical_remote_only')")
+        shutil.copy2(HISTORICAL, historical_copy)
+        before = master.sql("select version from supabase_migrations.schema_migrations "
+                            "order by version")
+        if "20260909040437" not in before:
+            raise AssertionError("remote-only history marker absent in isolated database")
+
+        for source, expected in ((private.EXPAND, "20260926200632"),
+                                 (private.CONTRACT, "20260927153000")):
+            shutil.copy2(source, root / "supabase/migrations" / source.name)
+            local.assert_static_target_safety(root)
+            command = ["supabase", "db", "push", "--local", "--skip-vault",
+                       "--workdir", str(root)]
+            dry = subprocess.run(command + ["--dry-run"], text=True,
+                                 capture_output=True, timeout=90)
+            dry_text = dry.stdout + dry.stderr
+            if dry.returncode != 0 or dry_text.count(expected) != 1:
+                raise AssertionError("selective dry-run failed for " + expected + ": "
+                                     + dry_text[-500:])
+            other = "20260927153000" if expected == "20260926200632" else "20260926200632"
+            if other in dry_text or "20260909040437" in dry_text:
+                raise AssertionError("selective dry-run includes an unexpected migration")
+            print("PASS selective dry-run: only " + expected + " pending")
+            applied = subprocess.run(command + ["--yes"], text=True,
+                                     capture_output=True, timeout=120)
+            if applied.returncode != 0:
+                raise AssertionError("selective apply failed for " + expected + ": "
+                                     + (applied.stdout + applied.stderr)[-500:])
+            after = master.sql("select version from supabase_migrations.schema_migrations "
+                               "order by version")
+            if after.splitlines() != before.splitlines() + [expected]:
+                raise AssertionError("selective apply changed unexpected migration history")
+            before = after
+            print("PASS selective apply: exactly " + expected + " recorded")
+        print("PASS selective history: remote-only version retained; A and B each once")
+    finally:
+        try:
+            # A fresh reset must never execute the historical remote-only
+            # statement: the fixture exists solely to match applied history.
+            historical_copy.unlink(missing_ok=True)
+            local.reset_local_database(root)
+            if master.sql("select (select count(*) from auth.users), "
+                          "(select count(*) from public.properties), "
+                          "(select count(*) from public.property_images), "
+                          "(select count(*) from storage.objects where bucket_id in "
+                          "('property-images','property-images-private'))") != "0|0|0|0":
+                raise AssertionError("selective rehearsal cleanup incomplete")
+        finally:
+            shutil.rmtree(root)
+
+
 def run() -> None:
     local.assert_static_target_safety(ROOT)
     if os.environ.get("COMPAT_ONLY") == "contract-precondition":
         contract_precondition()
+        return
+    if os.environ.get("COMPAT_ONLY") == "selective-migrations":
+        selective_migration_rehearsal()
         return
     old_url, new_url = os.environ["OLD_APP_URL"], os.environ["NEW_APP_URL"]
     for url in (old_url, new_url):
         local.reject_remote_value("application URL", url)
     scenarios = (("old", "baseline"), ("old", "A"), ("new", "A"), ("new", "B"))
     only = os.environ.get("COMPAT_ONLY")
-    if only:
+    if only == "old+B":
+        scenarios = ()
+    elif only:
         scenarios = tuple((app, phase) for app, phase in scenarios if f"{app}+{phase}" == only)
         if len(scenarios) != 1:
             raise AssertionError("COMPAT_ONLY must identify one known local scenario")
     for app, phase in scenarios:
         run_scenario(old_url if app == "old" else new_url, app, phase)
+    if not only:
+        old_contract_lockdown(old_url)
+    elif only == "old+B":
+        old_contract_lockdown(old_url)
     print(f"CLEANUP: {len(scenarios)} scenario(s) left zero synthetic users, properties, images and objects")
 
 

@@ -218,6 +218,21 @@ def run() -> None:
         if code != 200 or data != PNG:
             raise AssertionError(f"owner exact-path private draft download failed: HTTP {code}")
         expect_private_listing(client, path, owner["token"], True)
+        # The RPC must reject metadata that points outside the private bucket
+        # or to a missing object, even if an owner created the draft.
+        missing_path = f"{owner['id']}/{property_id}/{uuid.uuid4()}.png"
+        for column, bad_value in (("storage_bucket", "property-images"),
+                                  ("storage_path", missing_path)):
+            master.sql(f"update public.property_images set {column}='{bad_value}' "
+                       f"where id='{image['id']}'")
+            rejected, _ = client.request("POST", "/rest/v1/rpc/finalize_private_property_publication",
+                                         token=owner["token"], payload={"p_property_id": property_id})
+            if rejected < 400:
+                raise AssertionError(f"owner finalized draft with invalid {column}")
+            original = "property-images-private" if column == "storage_bucket" else path
+            master.sql(f"update public.property_images set {column}='{original}' "
+                       f"where id='{image['id']}'")
+        print("PASS: private finalization rejects wrong bucket and missing object")
         published, published_slug = client.request("POST", "/rest/v1/rpc/finalize_private_property_publication",
                                                    token=owner["token"], payload={"p_property_id": property_id})
         if published != 200 or published_slug != slug:

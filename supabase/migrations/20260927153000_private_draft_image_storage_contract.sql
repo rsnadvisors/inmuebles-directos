@@ -33,14 +33,12 @@ begin
         and tablename='property_images' and policyname='owners add own property images') then
     raise exception 'Private image contract precondition: policy set differs';
   end if;
-  -- Do not strand an in-flight old publication. Human rollout must also prove
-  -- that no old application instance remains before this transaction starts.
-  if exists (select 1 from public.property_images i join public.properties p on p.id=i.property_id
-      where p.status='draft' and i.storage_bucket='property-images')
-      or exists (select 1 from storage.objects o join public.properties p
-        on p.id::text=(storage.foldername(o.name))[2]
-        where o.bucket_id='property-images' and p.status='draft') then
-    raise exception 'Private image contract precondition: unfinished legacy draft exists';
+  -- The old publisher inserts the draft before uploading its first object.
+  -- No persisted field distinguishes that interval from another draft, so
+  -- refuse every draft rather than strand an in-flight publication. Human
+  -- rollout must also quiesce old publishers before this transaction starts.
+  if exists (select 1 from public.properties where status='draft') then
+    raise exception 'Private image contract precondition: unsafe legacy drafts exist; Contract cannot proceed until legacy publication is quiesced and drafts are resolved';
   end if;
 end;
 $preflight$;
