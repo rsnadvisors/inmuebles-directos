@@ -2,7 +2,7 @@ import { cache } from "react";
 import { normalizeListing, type Listing } from "./inventory";
 import { supabase } from "./supabase";
 
-export const PROPERTY_DETAIL_SELECT = "id,title,slug,status,listing_type,property_type,price,currency,maintenance_fee,area_total_m2,area_built_m2,bedrooms,bathrooms,parking_spaces,floors,description,address,district,city,region,country,lat,lng,published_at,property_images(id,public_url,alt_text,sort_order,is_cover)";
+export const PROPERTY_DETAIL_SELECT = "id,title,slug,status,listing_type,property_type,price,currency,maintenance_fee,area_total_m2,area_built_m2,bedrooms,bathrooms,parking_spaces,floors,description,address,district,city,region,country,lat,lng,published_at,property_images(id,storage_bucket,public_url,alt_text,sort_order,is_cover)";
 
 export async function queryPublishedListing(slug: string): Promise<Listing | null> {
   const normalizedSlug = slug.trim();

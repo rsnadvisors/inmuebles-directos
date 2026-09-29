@@ -3,7 +3,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { POST } from "../app/api/publicar/route";
 import { MAX_PHOTO_BYTES, MAX_REQUEST_BYTES } from "../app/lib/publication";
 
-const mock = vi.hoisted(() => ({ create: vi.fn(), property: vi.fn(), image: vi.fn(), upload: vi.fn(), url: vi.fn(), finalize: vi.fn(), lookup: vi.fn(), remove: vi.fn(), cleanupImages: vi.fn(), cleanupProperty: vi.fn(), calls: [] as string[] }));
+const mock = vi.hoisted(() => ({ create: vi.fn(), property: vi.fn(), image: vi.fn(), upload: vi.fn(), url: vi.fn(), delivery: vi.fn(), storageFrom: vi.fn(), finalize: vi.fn(), lookup: vi.fn(), remove: vi.fn(), cleanupImages: vi.fn(), cleanupProperty: vi.fn(), calls: [] as string[] }));
+vi.mock("../app/lib/property-images", () => ({
+  PRIVATE_PROPERTY_IMAGE_BUCKET: "property-images-private",
+  anonymousImageClient: () => ({}),
+  loadPublishedPrivateImage: mock.delivery,
+}));
 vi.mock("../app/lib/auth-server", () => ({ getVerifiedUser: async () => {
   if (!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) return { client: null, user: null };
   return { client: mock.create(), user: { id: "fixture-user" } };
@@ -28,9 +33,11 @@ beforeEach(() => {
   vi.stubEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY", "synthetic-anon");
   mock.calls.length = 0;
   mock.property.mockReset().mockImplementation(() => { mock.calls.push("property"); return { select: () => ({ single: async () => ({ data: { id: "fixture-id" }, error: null }) }) }; });
-  mock.image.mockReset().mockImplementation(async () => { mock.calls.push("image"); return { error: null }; });
+  mock.image.mockReset().mockImplementation(() => { mock.calls.push("image"); return { select: () => ({ single: async () => ({ data: { id: "11111111-1111-4111-8111-111111111111" }, error: null }) }) }; });
   mock.upload.mockReset().mockImplementation(async () => { mock.calls.push("upload"); return { error: null }; });
   mock.url.mockReset().mockReturnValue({ data: { publicUrl: "http://localhost/storage/v1/object/public/property-images/fixture.png" } });
+  mock.delivery.mockReset().mockImplementation(async () => { mock.calls.push("delivery"); return new Blob(["image"], { type: "image/png" }); });
+  mock.storageFrom.mockReset().mockImplementation(() => ({ upload: mock.upload, getPublicUrl: mock.url, remove: mock.remove }));
   mock.finalize.mockReset().mockImplementation(async () => { mock.calls.push("finalize"); return { data: mock.property.mock.calls[0][0].slug, error: null }; });
   mock.lookup.mockReset().mockResolvedValue({ data: { status: "draft" }, error: null });
   mock.remove.mockReset().mockImplementation(async () => { mock.calls.push("remove"); return { error: null }; });
@@ -42,7 +49,7 @@ beforeEach(() => {
       select: () => ({ eq: () => ({ maybeSingle: mock.lookup }) }),
       delete: () => ({ eq: table === "properties" ? mock.cleanupProperty : mock.cleanupImages }),
     }),
-    storage: { from: () => ({ upload: mock.upload, getPublicUrl: mock.url, remove: mock.remove }) },
+    storage: { from: mock.storageFrom },
     rpc: mock.finalize,
   });
 });
@@ -66,7 +73,7 @@ describe("publication server: validation before any write", () => {
   it.each([["latitude", ""], ["latitude", "NaN"], ["latitude", "Infinity"], ["latitude", "-19.01"], ["latitude", "1.01"], ["longitude", ""], ["longitude", "-82.01"], ["longitude", "-67.99"], ["coordinatesConfirmed", "false"]])("rejects %s=%s", async (key, value) => {
     const data = form(); data.set(key, value); await reject(data);
   });
-  it.each(["status", "slug", "storage_path", "public_url", "owner_id", "agent_id", "is_cover", "sort_order"])("rejects controlled field %s", async key => {
+  it.each(["status", "slug", "storage_path", "storage_bucket", "public_url", "owner_id", "agent_id", "is_cover", "sort_order"])("rejects controlled field %s", async key => {
     const data = form(); data.set(key, "attacker-value"); await reject(data);
   });
   it("rejects duplicate scalar values", async () => { const data = form(); data.append("price", "200"); await reject(data); });
@@ -112,14 +119,17 @@ describe("publication server: draft then controlled finalization", () => {
     expect(response.status).toBe(200); expect(await response.json()).toEqual({ ok: true, status: "published", slug: expect.stringMatching(/^casa-[0-9a-f-]{36}$/) });
     expect(mock.property).toHaveBeenCalledWith(expect.objectContaining({ title: "Casa", description: "Descripción", address: "Dirección", price: 100.5, listing_type: listing, property_type: property, currency: "USD", city: "Piura", region: "Piura", owner_id: "fixture-user", status: "draft", published_at: null, lat: -5.19, lng: -80.63 }));
     expect(mock.property.mock.calls[0][0].slug).toMatch(/^casa-[0-9a-f-]{36}$/);
-    expect(mock.calls).toEqual(["property", "upload", "image", "finalize"]);
-    expect(mock.finalize).toHaveBeenCalledWith("finalize_own_property_publication", { p_property_id: "fixture-id" });
+    expect(mock.calls).toEqual(["property", "upload", "image", "finalize", "delivery"]);
+    expect(mock.storageFrom).toHaveBeenCalledWith("property-images-private");
+    expect(mock.url).not.toHaveBeenCalled();
+    expect(mock.image.mock.calls[0][0]).toMatchObject({ storage_bucket: "property-images-private", public_url: null });
+    expect(mock.finalize).toHaveBeenCalledWith("finalize_private_property_publication", { p_property_id: "fixture-id" });
   });
   it("accepts five max-size photos and uses canonical names, ordering and cover", async () => {
     const data = form(); data.delete("images");
     for (const type of ["image/jpeg", "image/png", "image/webp", "image/png", "image/png"]) data.append("images", photo(type, MAX_PHOTO_BYTES));
     expect((await POST(request(data))).status).toBe(200);
-    expect(mock.calls).toEqual(["property", ...Array.from({ length: 5 }, () => ["upload", "image"]).flat(), "finalize"]);
+    expect(mock.calls).toEqual(["property", ...Array.from({ length: 5 }, () => ["upload", "image"]).flat(), "finalize", "delivery"]);
     const paths = mock.upload.mock.calls.map(call => call[0]);
     expect(new Set(paths).size).toBe(5);
     for (const [i, extension] of ["jpg", "png", "webp", "png", "png"].entries()) {
@@ -166,12 +176,12 @@ describe("publication server: failures never finalize a partial draft", () => {
     expect(mock.remove.mock.calls[0][0]).toHaveLength(2);
   });
   it("C: image row fails after upload", async () => {
-    mock.image.mockResolvedValue({ error: secretError }); await failed("METADATA_FAILED");
+    mock.image.mockImplementation(() => { mock.calls.push("image"); return { select: () => ({ single: async () => ({ data: null, error: secretError }) }) }; }); await failed("METADATA_FAILED");
     expect(mock.upload).toHaveBeenCalledTimes(1); expect(mock.image).toHaveBeenCalledTimes(1);
   });
   it("D: unexpected exception after first upload", async () => {
-    mock.url.mockImplementation(() => { throw secretError; }); await failed("UPLOAD_FAILED");
-    expect(mock.upload).toHaveBeenCalledTimes(1); expect(mock.image).not.toHaveBeenCalled();
+    mock.image.mockImplementation(() => { throw secretError; }); await failed("METADATA_FAILED");
+    expect(mock.upload).toHaveBeenCalledTimes(1); expect(mock.image).toHaveBeenCalledOnce();
   });
   it("E: finalization fails while the property remains a draft", async () => {
     mock.finalize.mockImplementation(async () => { mock.calls.push("finalize"); return { data: null, error: secretError }; });
@@ -186,5 +196,15 @@ describe("publication server: failures never finalize a partial draft", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true, status: "published", slug: "confirmed-slug" });
     expect(mock.remove).not.toHaveBeenCalled();
+  });
+  it("F: committed publication with failed image delivery is uncertain, without cleanup", async () => {
+    mock.delivery.mockImplementation(async () => { mock.calls.push("delivery"); throw secretError; });
+    const response = await POST(request());
+    expect(response.status).toBe(502);
+    expect((await response.json()).code).toBe("DELIVERY_UNCERTAIN");
+    expect(mock.remove).not.toHaveBeenCalled();
+    expect(mock.cleanupImages).not.toHaveBeenCalled();
+    expect(mock.cleanupProperty).not.toHaveBeenCalled();
+    expect(mock.property).toHaveBeenCalledOnce();
   });
 });

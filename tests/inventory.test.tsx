@@ -65,6 +65,14 @@ describe("inventory normalization", () => {
     expect(normalized.imageItems[0]).toEqual({ url: "second", altText: "Cover alt" });
     expect(images[0].public_url).toBe("second");
   });
+  it("retains cover order across legacy and private-backed published image sources", () => {
+    const imageId = "11111111-1111-4111-8111-111111111111";
+    const item = normalizeListing(row({ property_images: [
+      { id: "legacy", storage_bucket: "property-images", public_url: "https://images.unsplash.com/legacy.jpg", sort_order: 0, is_cover: false },
+      { id: imageId, storage_bucket: "property-images-private", public_url: null, sort_order: 1, is_cover: true },
+    ] }))!;
+    expect(item.images).toEqual([`/api/property-images/${imageId}`, "https://images.unsplash.com/legacy.jpg"]);
+  });
   it("derives compact and preview locations from normalized location parts", () => {
     const item = normalizeListing(row({ address: " Avenida Uno ", district: "Centro", city: "Piura", region: "Piura" }))!;
     expect(compactLocation(item)).toBe("Centro, Piura");

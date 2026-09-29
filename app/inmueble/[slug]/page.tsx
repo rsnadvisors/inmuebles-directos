@@ -34,7 +34,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
       url: canonical,
       title: property.title,
       description,
-      ...(property.imageItems[0] ? { images: [{ url: property.imageItems[0].url, alt: property.imageItems[0].altText || property.title }] } : {}),
+      ...(property.imageItems[0] ? { images: [{ url: new URL(property.imageItems[0].url, "https://inmueblesdirectos.com").href, alt: property.imageItems[0].altText || property.title }] } : {}),
     },
   };
 }

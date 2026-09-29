@@ -32,6 +32,15 @@ describe("canonical property page", () => {
     expect(metadata.alternates?.canonical).toBe("/inmueble/fixture-house");
   });
 
+  it("uses the absolute stable public app URL for a private-backed published cover", async () => {
+    const imageId = "11111111-1111-4111-8111-111111111111";
+    setInventory([{ ...properties[0], property_images: [{ id: imageId, storage_bucket: "property-images-private", public_url: null, sort_order: 0, is_cover: true, alt_text: "Fachada" }] }]);
+    const metadata = await generateMetadata({ params: Promise.resolve({ slug: "fixture-house" }) });
+    expect(metadata.openGraph?.images).toEqual([{ url: `https://inmueblesdirectos.com/api/property-images/${imageId}`, alt: "Fachada" }]);
+    render(await PropertyPage({ params: Promise.resolve({ slug: "fixture-house" }) }));
+    expect(screen.getByAltText("Fachada").getAttribute("src")).toBe(`/api/property-images/${imageId}`);
+  });
+
   it("returns notFound for unknown, empty and non-published slugs", async () => {
     setInventory([{ ...properties[0], status: "draft" }]);
     await expect(PropertyPage({ params: Promise.resolve({ slug: "fixture-house" }) })).rejects.toMatchObject({ digest: "NEXT_HTTP_ERROR_FALLBACK;404" });

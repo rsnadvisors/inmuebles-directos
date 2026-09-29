@@ -11,6 +11,7 @@ create table public.properties (
   currency text not null default 'PEN',
   description text,
   address text,
+  district text,
   city text,
   region text,
   country text not null default 'Peru',
@@ -33,6 +34,7 @@ create table public.property_images (
   property_id uuid not null references public.properties(id) on delete cascade,
   storage_path text not null,
   public_url text not null,
+  alt_text text,
   sort_order integer,
   is_cover boolean not null default false
 );
