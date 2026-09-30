@@ -34,6 +34,10 @@ jobs:
         run: PRIVATE_DRAFT_PHASE=A python3 tests/security/private_draft_images.py
       - name: Private image contract Storage regression
         run: PRIVATE_DRAFT_PHASE=B python3 tests/security/private_draft_images.py
+      - name: Published private image delivery remediation with Expand
+        run: PRIVATE_DRAFT_PHASE=A PRIVATE_IMAGE_REMEDIATION=1 python3 tests/security/private_draft_images.py
+      - name: Published private image delivery remediation with future Contract
+        run: PRIVATE_DRAFT_PHASE=B PRIVATE_IMAGE_REMEDIATION=1 python3 tests/security/private_draft_images.py
       - name: In-flight legacy draft Contract preflight regression
         run: COMPAT_ONLY=contract-precondition python3 tests/security/private_draft_compatibility.py
       - name: Selective Expand and Contract migration rehearsal

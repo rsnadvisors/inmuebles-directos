@@ -4,6 +4,7 @@ import { PRIVATE_PROPERTY_IMAGE_BUCKET, anonymousImageClient, loadPublishedPriva
 
 export const runtime = "nodejs";
 const failure = (code: string, message: string, status: number) => Response.json({ ok: false, code, message }, { status });
+const PUBLICATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 class BodyTooLarge extends Error {}
 
 async function deliveryAvailable(imageId: string | null): Promise<boolean> {
@@ -53,14 +54,34 @@ export async function POST(request: Request): Promise<Response> {
     if (error instanceof PublicationValidationError) return failure("VALIDATION_ERROR", error.message, 400);
     return failure("INVALID_REQUEST", "No se pudo leer el formulario.", 400);
   }
+  const suppliedId = request.headers.get("x-publication-request-id");
+  if (suppliedId !== null && !PUBLICATION_ID.test(suppliedId)) {
+    return failure("INVALID_REQUEST", "El identificador de publicación no es válido.", 400);
+  }
   let propertyId: string | null = null;
   let primaryImageId: string | null = null;
   const attemptedPaths: string[] = [];
   let stage: "create" | "upload" | "metadata" | "finalize" | "delivery" = "create";
+  const slug = `${input.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "propiedad"}-${suppliedId ?? crypto.randomUUID()}`;
+  const publishedResult = async (resolvedSlug: string) => {
+    if (!primaryImageId) return Response.json({ ok: true, status: "published", slug: resolvedSlug, imageDelivery: "not_checked" });
+    const delivered = await deliveryAvailable(primaryImageId);
+    return Response.json(delivered
+      ? { ok: true, status: "published", slug: resolvedSlug }
+      : { ok: true, status: "published", slug: resolvedSlug, imageDelivery: "unconfirmed" });
+  };
   try {
     const { files, ...propertyFields } = input;
-    const slug = `${input.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "propiedad"}-${crypto.randomUUID()}`;
-    const { data: property, error } = await supabase.from("properties").insert({ ...propertyFields, slug, country: "Peru", owner_id: user.id, agent_id: null, status: "draft", published_at: null }).select("id").single();
+    if (suppliedId) {
+      const existing = await supabase.from("properties").select("id,status,slug")
+        .eq("id", suppliedId).eq("owner_id", user.id).maybeSingle();
+      if (existing.error) throw new Error("Publication lookup failed");
+      if (existing.data?.status === "published") return await publishedResult(existing.data.slug);
+      if (existing.data) return failure("PUBLICATION_IN_PROGRESS", "Revisa la publicación existente en Mis propiedades.", 409);
+    }
+    const { data: property, error } = await supabase.from("properties").insert({ ...propertyFields,
+      ...(suppliedId ? { id: suppliedId } : {}), slug, country: "Peru", owner_id: user.id,
+      agent_id: null, status: "draft", published_at: null }).select("id").single();
     if (error || !property?.id) throw new Error("Draft creation failed");
     propertyId = property.id;
     for (const [index, file] of files.entries()) {
@@ -78,22 +99,29 @@ export async function POST(request: Request): Promise<Response> {
     const finalized = await supabase.rpc("finalize_private_property_publication", { p_property_id: property.id });
     if (finalized.error || finalized.data !== slug) throw new Error("Finalization failed");
     stage = "delivery";
-    if (!await deliveryAvailable(primaryImageId)) throw new Error("Published image delivery unconfirmed");
-    return Response.json({ ok: true, status: "published", slug });
+    return await publishedResult(slug);
   } catch {
-    if (!propertyId) return failure("DRAFT_CREATE_UNCERTAIN", "No pudimos confirmar la creación del borrador. Revisa Mis propiedades antes de volver a intentar.", 502);
+    if (!propertyId) {
+      if (suppliedId) {
+        try {
+          const existing = await supabase.from("properties").select("id,status,slug")
+            .eq("id", suppliedId).eq("owner_id", user.id).maybeSingle();
+          if (!existing.error && existing.data?.status === "published") return await publishedResult(existing.data.slug);
+          if (!existing.error && existing.data) return failure("PUBLICATION_IN_PROGRESS", "Revisa la publicación existente en Mis propiedades.", 409);
+        } catch { /* the result remains uncertain; never insert again here */ }
+      }
+      return failure("DRAFT_CREATE_UNCERTAIN", "No pudimos confirmar la creación del borrador. Revisa Mis propiedades antes de volver a intentar.", 502);
+    }
     // The RPC has committed. Never clean up or retry writes on a delivery
     // failure; the user must inspect the existing listing before trying again.
-    if (stage === "delivery") return failure("DELIVERY_UNCERTAIN", "La publicación quedó registrada, pero no pudimos confirmar la imagen. Revisa Mis propiedades antes de volver a intentar.", 502);
+    if (stage === "delivery") return publishedResult(slug);
     if (stage === "finalize") {
       // A lost RPC response may hide a committed publication. Verify before
       // claiming that the listing is unpublished or attempting cleanup.
       try {
         const result = await supabase.from("properties").select("status,slug").eq("id", propertyId).maybeSingle();
         if (!result.error && result.data?.status === "published") {
-          return await deliveryAvailable(primaryImageId)
-            ? Response.json({ ok: true, status: "published", slug: result.data.slug })
-            : failure("DELIVERY_UNCERTAIN", "La publicación quedó registrada, pero no pudimos confirmar la imagen. Revisa Mis propiedades antes de volver a intentar.", 502);
+          return publishedResult(result.data.slug);
         }
         if (result.error || !result.data || result.data.status !== "draft") return failure("FINALIZATION_UNCERTAIN", "No pudimos confirmar el resultado. Revisa Mis propiedades antes de volver a intentar.", 502);
       } catch { return failure("FINALIZATION_UNCERTAIN", "No pudimos confirmar el resultado. Revisa Mis propiedades antes de volver a intentar.", 502); }

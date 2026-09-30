@@ -4,6 +4,7 @@ import Link from "next/link";
 import { FormEvent, useRef, useState } from "react";
 import { MAX_PRICE, PARTIAL_MESSAGE, validatePhotos, validatePublication, validCoordinates } from "../lib/publication";
 import SiteHeader from "../components/SiteHeader";
+import { publicationFingerprint } from "../lib/publication-attempt";
 
 const initialCoordinates = { latitude: "", longitude: "" };
 export default function PublishPage() {
@@ -16,6 +17,7 @@ export default function PublishPage() {
   const [publishedSlug, setPublishedSlug] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const submitting = useRef(false);
+  const submissionAttempt = useRef<{ id: string; fingerprint: string } | null>(null);
   const locationVersion = useRef(0);
 
   function editCoordinate(key: keyof typeof coords, value: string) {
@@ -63,7 +65,8 @@ export default function PublishPage() {
     payload.set("longitude", coords.longitude);
     payload.set("coordinatesConfirmed", String(coordinatesConfirmed));
     files.forEach(file => payload.append("images", file));
-    try { validatePublication(payload); }
+    let input: ReturnType<typeof validatePublication>;
+    try { input = validatePublication(payload); }
     catch (error) { setStatus((error as Error).message); return; }
     submitting.current = true;
     locationVersion.current++;
@@ -72,19 +75,40 @@ export default function PublishPage() {
     setPublishedSlug(null);
     setStatus("Publicando…");
     try {
-      const response = await fetch("/api/publicar", { method: "POST", body: payload });
+      const fingerprint = await publicationFingerprint(input);
+      let attempt = submissionAttempt.current;
+      if (!attempt) {
+        try {
+          const stored = JSON.parse(window.sessionStorage.getItem("publicationAttempt") ?? "null");
+          if (stored && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(stored.id) && /^[0-9a-f]{64}$/.test(stored.fingerprint)) attempt = stored;
+        } catch { /* unavailable or invalid tab storage */ }
+      }
+      if (attempt && attempt.fingerprint !== fingerprint) {
+        setUncertain(true);
+        setStatus("Hay una publicación anterior pendiente de confirmar. Revisa Mis propiedades antes de iniciar otra con estos datos.");
+        return;
+      }
+      attempt ??= { id: crypto.randomUUID(), fingerprint };
+      submissionAttempt.current = attempt;
+      try { window.sessionStorage.setItem("publicationAttempt", JSON.stringify(attempt)); } catch { /* ref preserves current attempt */ }
+      const response = await fetch("/api/publicar", { method: "POST", body: payload,
+        headers: { "X-Publication-Request-Id": attempt.id } });
       const result = await response.json();
       if (response.status === 401) {
         window.location.assign("/login?returnTo=/publicar");
         setStatus("La sesión expiró. Inicia sesión para continuar.");
       } else if (response.ok && result.ok === true && result.status === "published") {
+        submissionAttempt.current = null;
+        try { window.sessionStorage.removeItem("publicationAttempt"); } catch { /* no persisted value */ }
         form.reset();
         setFiles([]);
         setCoords(initialCoordinates);
         setCoordinatesConfirmed(false);
         setPropertyType("Casas");
         setPublishedSlug(typeof result.slug === "string" ? result.slug : null);
-        setStatus("Propiedad publicada. Puedes verla en Mis propiedades.");
+        setStatus(result.imageDelivery === "unconfirmed"
+          ? "Propiedad publicada. No pudimos confirmar la imagen; revísala en Mis propiedades. No vuelvas a publicarla."
+          : "Propiedad publicada. Puedes verla en Mis propiedades.");
       } else if (result.ok === false && ["VALIDATION_ERROR", "INVALID_REQUEST", "INVALID_CONTENT_TYPE", "INVALID_ORIGIN", "REQUEST_TOO_LARGE", "PUBLICATION_FAILED", "UPLOAD_FAILED", "METADATA_FAILED", "FINALIZATION_FAILED"].includes(result.code)) {
         setStatus(typeof result.message === "string" ? result.message : "No se pudo completar la publicación.");
       } else {
@@ -123,6 +147,11 @@ export default function PublishPage() {
       <label>Fotos de la propiedad<input type="file" accept="image/jpeg,image/png,image/webp" multiple required disabled={isSubmitting} onChange={onFiles} /><small>Obligatorio: 1 a 5 fotos · JPG, PNG o WebP · máximo 5 MiB por foto.</small>{files.length > 0 && <small>{files.length} foto(s) seleccionada(s).</small>}</label>
       <button className="publish-submit" type="submit" disabled={isSubmitting}>{isSubmitting ? "Publicando…" : "Publicar propiedad"}</button>
       {status && <p className="form-status" role={uncertain ? "alert" : "status"}>{status}</p>}
+      {uncertain && <div className="publish-success-links"><Link href="/mis-propiedades">Revisar Mis propiedades</Link><button type="button" onClick={() => {
+        submissionAttempt.current = null;
+        try { window.sessionStorage.removeItem("publicationAttempt"); } catch { /* no persisted value */ }
+        setUncertain(false); setStatus("Puedes iniciar una nueva publicación.");
+      }}>Ya revisé Mis propiedades; iniciar otra publicación</button></div>}
       {status.startsWith("Propiedad publicada") && <div className="publish-success-links">{publishedSlug && <Link href={`/inmueble/${encodeURIComponent(publishedSlug)}`}>Ver ficha completa</Link>}<Link href="/mis-propiedades">Ver Mis propiedades</Link></div>}
     </form>
   </main></>;
