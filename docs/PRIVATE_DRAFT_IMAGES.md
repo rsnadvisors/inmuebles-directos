@@ -162,3 +162,39 @@ there to already published managed properties. Expand deliberately does not.
 After the first private-backed production image, never roll the application
 back to a reader that only understands non-null `public_url`; retain the
 private bucket, `storage_bucket` metadata, dual reader and delivery route.
+
+## Published delivery remediation
+
+The managed Storage delivery path authorized an individual object-info read
+(`object.get_authenticated_info`) for a download requested by storage-js. The
+SDK itself emits one object GET; standalone Storage does not necessarily make
+the additional info request. Expand allowed only `object.get_authenticated`,
+so an existing published image could return `NoSuchKey` and the app returned
+503. The forward migration
+`20260930134657_fix_private_published_image_delivery.sql` additionally permits
+only authenticated-info for the same published, owner-matched exact object.
+It preserves the private bucket and denies anonymous/unrelated listing and
+draft access. It does not apply Contract or alter its source.
+
+Publication previously reported 502 after a committed finalization when this
+delivery check failed. A committed publication now returns its canonical slug
+and, if needed, an explicit image-delivery warning. New UI attempts carry a
+UUID used as the property primary key; owner-filtered reconciliation and the
+existing primary-key constraint prevent repeated/concurrent inserts. A local
+fingerprint of normalized fields and photo bytes/types binds retries to the
+same intent across page navigation. Changed data requires checking Mis
+propiedades and explicitly starting a new attempt. No raw form data, token,
+or credential is persisted by this mechanism. Old clients without the header
+remain compatible during deployment.
+
+Run the versioned synthetic Storage tests with
+`PRIVATE_IMAGE_REMEDIATION=1 PRIVATE_DRAFT_PHASE=A` (and separately B) to verify
+individual published reads/info, draft denial and listing protection. CI runs
+both. The isolated rollout rehearsal additionally checks A -> remediation -> B
+in that order, real HTTP lost-response/concurrent publication, and exact old
+code before/after remediation. These laboratory tests never target production.
+
+Production rollout must select only the new remediation migration, review the
+exact app commit, then observe its automatic deploy and reuse the existing QA
+fixture. **Phase B remains blocked until remediation is deployed, QA passes
+and old-publisher quiescence is proved in a separate gate.**

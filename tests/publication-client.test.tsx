@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { webcrypto } from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import PublishPage from "../app/publicar/page";
 import { MAX_PHOTO_BYTES, PARTIAL_MESSAGE, validatePublication } from "../app/lib/publication";
@@ -11,13 +12,18 @@ const submit = () => fireEvent.submit(field("Título del anuncio").form!);
 const confirm = () => fireEvent.click(screen.getByRole("button", { name: "Confirmar coordenadas" }));
 const reply = (body: unknown, status = 200) => ({ ok: status < 400, json: async () => body });
 function ready(confirmed = true) {
-  render(<PublishPage />);
+  const view = render(<PublishPage />);
   change("Título del anuncio", "Casa de prueba"); change("Descripción", "Descripción de prueba");
   change("Dirección o sector", "Piura"); change("Región", "Piura"); change("Ciudad o provincia", "Piura"); change("Precio", "100.5");
   change("Latitud", "-5.19"); change("Longitud", "-80.63");
   pick([photo()]); if (confirmed) confirm();
+  return view;
 }
-beforeEach(() => vi.stubGlobal("fetch", vi.fn().mockResolvedValue(reply({ ok: true, status: "published" }))));
+beforeEach(() => {
+  window.sessionStorage.clear();
+  vi.stubGlobal("crypto", webcrypto);
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(reply({ ok: true, status: "published" })));
+});
 
 describe("publication client guards", () => {
   it.each(["Título del anuncio", "Descripción", "Dirección o sector"])("rejects blank %s before request", name => {
@@ -102,11 +108,12 @@ describe("submission lifecycle", () => {
     vi.mocked(fetch).mockImplementation(() => new Promise(done => { resolve = done; }) as Promise<Response>);
     const form = field("Título del anuncio").form!;
     act(() => { fireEvent.submit(form); fireEvent.submit(form); });
-    expect(fetch).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
     expect((screen.getByRole("button", { name: "Publicando…" }) as HTMLButtonElement).disabled).toBe(true);
     expect(field("Título del anuncio").disabled).toBe(true);
     const [url, options] = vi.mocked(fetch).mock.calls[0];
     expect(url).toBe("/api/publicar"); expect(options?.method).toBe("POST");
+    expect((options?.headers as Record<string, string>)["X-Publication-Request-Id"]).toMatch(/^[0-9a-f-]{36}$/);
     const payload = options?.body as FormData; expect(payload.getAll("images")).toHaveLength(1);
     expect(payload.get("coordinatesConfirmed")).toBe("true"); expect(payload.has("status")).toBe(false);
     await act(async () => resolve(reply({ ok: true, status: "published" })));
@@ -136,5 +143,58 @@ describe("submission lifecycle", () => {
     submit(); expect((await screen.findByRole("alert")).textContent).toBe(PARTIAL_MESSAGE);
     expect(field("Título del anuncio").value).toBe("Casa de prueba"); expect(fetch).toHaveBeenCalledTimes(1);
     expect((screen.getByRole("button", { name: "Publicar propiedad" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+  it("keeps one request ID across an ambiguous response and clears it after confirmed publication", async () => {
+    ready();
+    vi.mocked(fetch).mockResolvedValueOnce(reply({ ok: false, code: "UNKNOWN" }, 502) as Response)
+      .mockResolvedValueOnce(reply({ ok: true, status: "published", imageDelivery: "unconfirmed" }) as Response);
+    submit(); await screen.findByRole("alert");
+    const firstId = (vi.mocked(fetch).mock.calls[0][1]?.headers as Record<string, string>)["X-Publication-Request-Id"];
+    expect(JSON.parse(window.sessionStorage.getItem("publicationAttempt")!).id).toBe(firstId);
+    submit(); await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+    const secondId = (vi.mocked(fetch).mock.calls[1][1]?.headers as Record<string, string>)["X-Publication-Request-Id"];
+    expect(secondId).toBe(firstId);
+    await waitFor(() => expect(screen.getByRole("status").textContent).toContain("Propiedad publicada"));
+    expect(screen.getByRole("status").textContent).toContain("imagen");
+    expect(window.sessionStorage.getItem("publicationAttempt")).toBeNull();
+  });
+  it("replays the same normalized intent and identical photo bytes after the page remounts", async () => {
+    const view = ready();
+    vi.mocked(fetch).mockResolvedValueOnce(reply({ ok: false, code: "UNKNOWN" }, 502) as Response)
+      .mockResolvedValueOnce(reply({ ok: true, status: "published", imageDelivery: "not_checked" }) as Response);
+    submit(); await screen.findByRole("alert");
+    const firstId = (vi.mocked(fetch).mock.calls[0][1]?.headers as Record<string, string>)["X-Publication-Request-Id"];
+    view.unmount(); ready();
+    change("Título del anuncio", "  Casa de prueba  "); change("Precio", "100.500");
+    submit(); await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+    const nextId = (vi.mocked(fetch).mock.calls[1][1]?.headers as Record<string, string>)["X-Publication-Request-Id"];
+    expect(nextId).toBe(firstId);
+    await waitFor(() => expect(screen.getByRole("status").textContent).toContain("Propiedad publicada"));
+    expect(window.sessionStorage.getItem("publicationAttempt")).toBeNull();
+  });
+  const bytesPhoto = (bytes: number[], type = "image/png") => new File([new Uint8Array(bytes)], "fixture.png", { type });
+  it.each([
+    ["title", () => {}, () => change("Título del anuncio", "Otra casa")],
+    ["price", () => {}, () => change("Precio", "200")],
+    ["photo bytes", () => {}, () => pick([bytesPhoto([1, 2, 3, 4])])],
+    ["photo MIME type", () => {}, () => pick([photo("image/jpeg")])],
+    ["photo order", () => pick([bytesPhoto([1]), bytesPhoto([2])]), () => pick([bytesPhoto([2]), bytesPhoto([1])])],
+  ] as const)("blocks changed %s until an explicit reviewed reset", async (_label, initial, edit) => {
+    ready(); initial();
+    vi.mocked(fetch).mockResolvedValueOnce(reply({ ok: false, code: "UNKNOWN" }, 502) as Response)
+      .mockResolvedValueOnce(reply({ ok: true, status: "published" }) as Response);
+    submit(); await screen.findByRole("alert");
+    const firstAttempt = window.sessionStorage.getItem("publicationAttempt");
+    const firstId = (vi.mocked(fetch).mock.calls[0][1]?.headers as Record<string, string>)["X-Publication-Request-Id"];
+    edit(); submit();
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("publicación anterior pendiente"));
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(window.sessionStorage.getItem("publicationAttempt")).toBe(firstAttempt);
+    fireEvent.click(screen.getByRole("button", { name: "Ya revisé Mis propiedades; iniciar otra publicación" }));
+    expect(window.sessionStorage.getItem("publicationAttempt")).toBeNull();
+    submit(); await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+    const nextId = (vi.mocked(fetch).mock.calls[1][1]?.headers as Record<string, string>)["X-Publication-Request-Id"];
+    expect(nextId).not.toBe(firstId);
+    await waitFor(() => expect(screen.getByRole("status").textContent).toContain("Propiedad publicada"));
   });
 });

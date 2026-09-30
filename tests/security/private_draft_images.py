@@ -27,6 +27,7 @@ import profile_authorization as local
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 EXPAND = ROOT / "supabase/migrations/20260926200632_private_draft_image_storage_expand.sql"
 CONTRACT = ROOT / "supabase/migrations/20260927153000_private_draft_image_storage_contract.sql"
+REMEDIATION = ROOT / "supabase/migrations/20260930134657_fix_private_published_image_delivery.sql"
 PNG = bytes.fromhex(
     "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
     "0000000b49444154789c636000020000050001a5f645400000000049454e44ae426082"
@@ -117,12 +118,17 @@ def expect_private_listing(client: local.LocalClient, path: str, token: str | No
 def run() -> None:
     local.assert_static_target_safety(ROOT)
     phase = os.environ.get("PRIVATE_DRAFT_PHASE", "B")
+    remediation = os.environ.get("PRIVATE_IMAGE_REMEDIATION") == "1"
     if phase not in ("A", "B") or not EXPAND.is_file() or not CONTRACT.is_file():
         raise AssertionError("invalid phase or versioned private-image migration missing")
+    if remediation and not REMEDIATION.is_file():
+        raise AssertionError("versioned private-image remediation migration missing")
     root = master.prepare()
     shutil.copy2(EXPAND, root / "supabase/migrations" / EXPAND.name)
     if phase == "B":
         shutil.copy2(CONTRACT, root / "supabase/migrations" / CONTRACT.name)
+    if remediation:
+        shutil.copy2(REMEDIATION, root / "supabase/migrations" / REMEDIATION.name)
     local.assert_static_target_safety(root)
     try:
         local.reset_local_database(root)
@@ -209,6 +215,10 @@ def run() -> None:
             code, _ = storage(client, "GET", image_suffix, actor)
             if code < 400:
                 raise AssertionError(f"{label} downloaded exact private draft path")
+            if remediation:
+                info_code, _ = storage(client, "GET", "object/info/property-images-private/" + path, actor)
+                if info_code < 400:
+                    raise AssertionError(f"{label} read private draft object-info")
             expect_private_listing(client, path, actor, False)
             finalized, _ = client.request("POST", "/rest/v1/rpc/finalize_private_property_publication",
                                           token=actor, payload={"p_property_id": property_id})
@@ -243,6 +253,11 @@ def run() -> None:
             code, data = storage(client, "GET", image_suffix, actor)
             if code != 200 or data != PNG:
                 raise AssertionError(f"{label} cannot download published private-backed image: HTTP {code}")
+            if remediation and label == "anon":
+                info_suffix = "object/info/property-images-private/" + path
+                info_code, _ = storage(client, "GET", info_suffix)
+                if info_code != 200:
+                    raise AssertionError(f"published object-info still denied: HTTP {info_code}")
             if app_url:
                 code, body, headers = app_get(app_url, "/api/property-images/" + image["id"], actor)
                 if code != 200 or body != PNG or "no-store" not in headers.get("cache-control", ""):

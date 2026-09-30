@@ -46,7 +46,7 @@ beforeEach(() => {
   mock.create.mockReset().mockReturnValue({
     from: (table: string) => ({
       insert: table === "properties" ? mock.property : mock.image,
-      select: () => ({ eq: () => ({ maybeSingle: mock.lookup }) }),
+      select: () => ({ eq: () => ({ eq: () => ({ maybeSingle: mock.lookup }), maybeSingle: mock.lookup }) }),
       delete: () => ({ eq: table === "properties" ? mock.cleanupProperty : mock.cleanupImages }),
     }),
     storage: { from: mock.storageFrom },
@@ -197,14 +197,79 @@ describe("publication server: failures never finalize a partial draft", () => {
     expect(await response.json()).toEqual({ ok: true, status: "published", slug: "confirmed-slug" });
     expect(mock.remove).not.toHaveBeenCalled();
   });
-  it("F: committed publication with failed image delivery is uncertain, without cleanup", async () => {
+  it("F: committed publication with failed image delivery reports published without cleanup or retry", async () => {
     mock.delivery.mockImplementation(async () => { mock.calls.push("delivery"); throw secretError; });
     const response = await POST(request());
-    expect(response.status).toBe(502);
-    expect((await response.json()).code).toBe("DELIVERY_UNCERTAIN");
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ok: true, status: "published", imageDelivery: "unconfirmed" });
     expect(mock.remove).not.toHaveBeenCalled();
     expect(mock.cleanupImages).not.toHaveBeenCalled();
     expect(mock.cleanupProperty).not.toHaveBeenCalled();
     expect(mock.property).toHaveBeenCalledOnce();
+  });
+  it("reuses a published result for the same request ID without a second insert, upload or finalization", async () => {
+    const id = "11111111-1111-4111-8111-111111111111";
+    mock.lookup.mockResolvedValue({ data: { id: "fixture-id", status: "published", slug: `casa-${id}` }, error: null });
+    const response = await POST(request(form(), { "x-publication-request-id": id }));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ok: true, status: "published", slug: `casa-${id}` });
+    expect(mock.property).not.toHaveBeenCalled();
+    expect(mock.upload).not.toHaveBeenCalled();
+    expect(mock.image).not.toHaveBeenCalled();
+    expect(mock.finalize).not.toHaveBeenCalled();
+  });
+  it("publishes once and makes a subsequent identical POST idempotent", async () => {
+    const id = "11111111-1111-4111-8111-111111111111";
+    mock.lookup.mockResolvedValueOnce({ data: null, error: null });
+    const first = await POST(request(form(), { "x-publication-request-id": id }));
+    expect(first.status).toBe(200);
+    expect((await first.json()).slug).toBe(`casa-${id}`);
+    expect(mock.property).toHaveBeenCalledWith(expect.objectContaining({ id }));
+    mock.lookup.mockResolvedValueOnce({ data: { id: "fixture-id", status: "published", slug: `casa-${id}` }, error: null });
+    const changed = form(); changed.set("title", "Otro título");
+    const second = await POST(request(changed, { "x-publication-request-id": id }));
+    expect(second.status).toBe(200);
+    expect((await second.json()).slug).toBe(`casa-${id}`);
+    expect(mock.property).toHaveBeenCalledOnce();
+    expect(mock.image).toHaveBeenCalledOnce();
+    expect(mock.upload).toHaveBeenCalledOnce();
+    expect(mock.finalize).toHaveBeenCalledOnce();
+  });
+  it("does not duplicate a draft when the same request ID is in progress", async () => {
+    const response = await POST(request(form(), { "x-publication-request-id": "11111111-1111-4111-8111-111111111111" }));
+    expect(response.status).toBe(409);
+    expect((await response.json()).code).toBe("PUBLICATION_IN_PROGRESS");
+    expect(mock.property).not.toHaveBeenCalled();
+  });
+  it.each(["draft", "published"])("reconciles a racing insert conflict against the same %s property", async status => {
+    const id = "11111111-1111-4111-8111-111111111111";
+    mock.lookup.mockResolvedValueOnce({ data: null, error: null })
+      .mockResolvedValueOnce({ data: { id, status, slug: `casa-${id}` }, error: null });
+    mock.property.mockReturnValue({ select: () => ({ single: async () => ({ data: null, error: { code: "23505" } }) }) });
+    const response = await POST(request(form(), { "x-publication-request-id": id }));
+    expect(response.status).toBe(status === "published" ? 200 : 409);
+    expect(await response.json()).toMatchObject(status === "published"
+      ? { ok: true, status: "published", slug: `casa-${id}`, imageDelivery: "not_checked" }
+      : { ok: false, code: "PUBLICATION_IN_PROGRESS" });
+    expect(mock.property).toHaveBeenCalledOnce();
+    expect(mock.upload).not.toHaveBeenCalled(); expect(mock.image).not.toHaveBeenCalled();
+    expect(mock.finalize).not.toHaveBeenCalled(); expect(mock.remove).not.toHaveBeenCalled();
+    expect(mock.cleanupProperty).not.toHaveBeenCalled();
+  });
+  it("a lost insert acknowledgment keeps the existing draft and the retry performs no new write", async () => {
+    const id = "11111111-1111-4111-8111-111111111111";
+    mock.lookup.mockResolvedValueOnce({ data: null, error: null })
+      .mockResolvedValue({ data: { id, status: "draft", slug: `casa-${id}` }, error: null });
+    mock.property.mockReturnValue({ select: () => ({ single: async () => { throw new Error("Lost insert reply"); } }) });
+    expect((await POST(request(form(), { "x-publication-request-id": id }))).status).toBe(409);
+    expect((await POST(request(form(), { "x-publication-request-id": id }))).status).toBe(409);
+    expect(mock.property).toHaveBeenCalledOnce(); expect(mock.upload).not.toHaveBeenCalled();
+    expect(mock.image).not.toHaveBeenCalled(); expect(mock.finalize).not.toHaveBeenCalled();
+    expect(mock.remove).not.toHaveBeenCalled(); expect(mock.cleanupProperty).not.toHaveBeenCalled();
+  });
+  it("rejects malformed request IDs before a write", async () => {
+    const response = await POST(request(form(), { "x-publication-request-id": "not-a-uuid" }));
+    expect(response.status).toBe(400);
+    expect(mock.calls).toEqual([]);
   });
 });
