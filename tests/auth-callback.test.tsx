@@ -42,6 +42,29 @@ beforeEach(() => {
 afterEach(() => { diagnosticLog.mockRestore(); vi.unstubAllEnvs(); });
 
 describe("Auth callback redirects", () => {
+  it("routes an exchanged recovery session to reset and preserves cookies", async () => {
+    auth.exchange.mockImplementationOnce(async (_code, setAll) => {
+      setAll([{ name: "sb-session", value: "fixture-session", options: { path: "/" } }]);
+      return { data: { redirectType: "recovery" }, error: null };
+    });
+    const response = await GET(callback("/cuenta", "fixture-code"));
+    expect(response.headers.get("location")).toBe("https://inmueblesdirectos.com/restablecer-password");
+    expect(response.cookies.get("sb-session")?.value).toBe("fixture-session");
+  });
+
+  it("retains the fixed recovery destination after a successful exchange", async () => {
+    const response = await GET(callback("/restablecer-password", "fixture-code"));
+    expect(response.headers.get("location")).toBe("https://inmueblesdirectos.com/restablecer-password");
+  });
+
+  it.each(["missing", "expired", "network"])("fails recovery safely for %s code", async failure => {
+    if (failure === "expired") auth.exchange.mockResolvedValueOnce({ error: new Error("sensitive failure") });
+    if (failure === "network") auth.exchange.mockRejectedValueOnce(new Error("sensitive failure"));
+    const response = await GET(callback("/restablecer-password", failure === "missing" ? undefined : "fixture-code"));
+    expect(response.headers.get("location")).toBe("https://inmueblesdirectos.com/recuperar-password?error=recovery");
+    expect(JSON.stringify(diagnosticLog.mock.calls)).not.toContain("sensitive failure");
+  });
+
   it("uses the production origin on success and preserves session cookies", async () => {
     const response = await GET(callback("/cuenta", "fixture-code", undefined, "sb-project-auth-token-code-verifier=fixture-verifier"));
     expect(response.headers.get("location")).toBe("https://inmueblesdirectos.com/cuenta");
