@@ -1,0 +1,1 @@
+export default function AdminLoading() { return <section className="admin-panel" role="status" aria-live="polite"><h2>Cargando panel…</h2><p>Espera mientras se consulta la información.</p></section>; }
