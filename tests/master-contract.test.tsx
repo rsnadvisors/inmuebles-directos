@@ -12,7 +12,7 @@ const listings = normalizeInventory(properties.map((row, index) => ({
 
 function publication(type = "Casas") {
   const form = new FormData();
-  Object.entries({ title: "Casa", description: "Descripción", address: "Calle pública", city: "Piura", region: "Piura", operation: "Vender", type, price: "120000", currency: "PEN", latitude: "-5.1", longitude: "-80.6", coordinatesConfirmed: "true" }).forEach(([key, value]) => form.set(key, value));
+  Object.entries({ contact_phone: "900000001", title: "Casa", description: "Descripción", address: "Calle pública", city: "Piura", region: "Piura", operation: "Vender", type, price: "120000", currency: "PEN", latitude: "-5.1", longitude: "-80.6", coordinatesConfirmed: "true" }).forEach(([key, value]) => form.set(key, value));
   form.append("images", new File(["synthetic"], "fixture.png", { type: "image/png" }));
   return form;
 }

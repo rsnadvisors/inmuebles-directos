@@ -1,3 +1,5 @@
+import { normalizeContactPhone } from "./contact-phone";
+
 export const MAX_PHOTOS = 5;
 export const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
 export const MAX_REQUEST_BYTES = 27 * 1024 * 1024;
@@ -6,7 +8,7 @@ export const imageExtensions = { "image/jpeg": "jpg", "image/png": "png", "image
 export const PARTIAL_MESSAGE = "No pudimos confirmar el resultado. Revisa Mis propiedades antes de volver a intentar.";
 const operations = { Vender: "sale", Alquilar: "rent" } as const;
 const types = { Casas: "house", Departamentos: "apartment", Terrenos: "land", Oficinas: "office", "Locales comerciales": "commercial" } as const;
-const fields = ["title", "description", "address", "district", "city", "region", "operation", "type", "price", "currency", "area_total_m2", "area_built_m2", "bedrooms", "bathrooms", "parking_spaces", "floors", "maintenance_fee", "latitude", "longitude", "coordinatesConfirmed"];
+const fields = ["title", "description", "address", "district", "city", "region", "operation", "type", "price", "currency", "area_total_m2", "area_built_m2", "bedrooms", "bathrooms", "parking_spaces", "floors", "maintenance_fee", "latitude", "longitude", "coordinatesConfirmed", "contact_phone"];
 
 export class PublicationValidationError extends Error {}
 function invalid(message: string): never { throw new PublicationValidationError(message); }
@@ -48,6 +50,8 @@ export function validatePublication(form: FormData) {
     if (key !== "images" && (!fields.includes(key) || form.getAll(key).length !== 1)) invalid("El formulario contiene campos no permitidos o repetidos.");
   }
   const title = text(form, "title", 120), description = text(form, "description", 3000), address = text(form, "address", 250);
+  const contact_phone = normalizeContactPhone(form.get("contact_phone"));
+  if (!contact_phone) invalid("Ingresa un teléfono de contacto válido: un móvil peruano de 9 dígitos o un número internacional con +.");
   const district = optionalText(form, "district", 120), city = text(form, "city", 120), region = text(form, "region", 120);
   const operation = text(form, "operation", 20), type = text(form, "type", 30), currency = text(form, "currency", 3);
   if (!Object.hasOwn(operations, operation) || !Object.hasOwn(types, type)) invalid("Selecciona una operación y un tipo de propiedad válidos.");
@@ -70,5 +74,5 @@ export function validatePublication(form: FormData) {
   if (images.some(file => !(file instanceof File))) invalid("Las fotos recibidas no son válidas.");
   const files = images as File[];
   validatePhotos(files);
-  return { title, description, address, district, city, region, listing_type: operations[operation as keyof typeof operations], property_type: types[type as keyof typeof types], price, currency, area_total_m2, area_built_m2, bedrooms, bathrooms, parking_spaces, floors, maintenance_fee, lat: number(latitude), lng: number(longitude), files };
+  return { title, description, address, district, city, region, contact_phone, listing_type: operations[operation as keyof typeof operations], property_type: types[type as keyof typeof types], price, currency, area_total_m2, area_built_m2, bedrooms, bathrooms, parking_spaces, floors, maintenance_fee, lat: number(latitude), lng: number(longitude), files };
 }

@@ -13,6 +13,7 @@ const confirm = () => fireEvent.click(screen.getByRole("button", { name: "Confir
 const reply = (body: unknown, status = 200) => ({ ok: status < 400, json: async () => body });
 function ready(confirmed = true) {
   const view = render(<PublishPage />);
+  change("Teléfono de contacto", "900 000 001");
   change("Título del anuncio", "Casa de prueba"); change("Descripción", "Descripción de prueba");
   change("Dirección o sector", "Piura"); change("Región", "Piura"); change("Ciudad o provincia", "Piura"); change("Precio", "100.5");
   change("Latitud", "-5.19"); change("Longitud", "-80.63");
@@ -26,6 +27,19 @@ beforeEach(() => {
 });
 
 describe("publication client guards", () => {
+  it.each(["", "123", "abc", "javascript:alert(1)"])("rejects invalid contact phone %s before request", value => {
+    ready(); change("Teléfono de contacto", value); submit(); expect(fetch).not.toHaveBeenCalled();
+    expect(screen.getByRole("status").textContent).toContain("teléfono de contacto válido");
+  });
+  it("discloses public contact and preserves input on failure", async () => {
+    ready(); const phone = field("Teléfono de contacto");
+    expect(phone.type).toBe("tel"); expect(phone.inputMode).toBe("tel"); expect(phone.required).toBe(true);
+    expect(screen.getByText(/Este número será público/)).toBeTruthy();
+    vi.mocked(fetch).mockResolvedValue(reply({ ok: false, code: "PUBLICATION_FAILED", message: "No disponible" }, 503) as Response);
+    submit(); await waitFor(() => expect(screen.getByRole("status").textContent).toContain("No disponible"));
+    expect(phone.value).toBe("900 000 001");
+    expect((vi.mocked(fetch).mock.calls[0][1]?.body as FormData).get("contact_phone")).toBe("900 000 001");
+  });
   it.each(["Título del anuncio", "Descripción", "Dirección o sector"])("rejects blank %s before request", name => {
     ready(); change(name, ""); submit(); expect(fetch).not.toHaveBeenCalled();
   });

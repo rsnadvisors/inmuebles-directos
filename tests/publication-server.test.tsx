@@ -17,7 +17,7 @@ const secretError = { message: "PRIVATE SQL secret bucket internals", code: "INT
 function photo(type = "image/png", size = 4) { return new File([new Uint8Array(size)], "../../untrusted.exe", { type }); }
 function form() {
   const data = new FormData();
-  Object.entries({ title: " Casa ", description: " Descripción ", address: " Dirección ", city: "Piura", region: "Piura", operation: "Vender", type: "Casas", price: "100.50", currency: "USD", latitude: "-5.19", longitude: "-80.63", coordinatesConfirmed: "true" }).forEach(([k, v]) => data.set(k, v));
+  Object.entries({ contact_phone: "900 000 001", title: " Casa ", description: " Descripción ", address: " Dirección ", city: "Piura", region: "Piura", operation: "Vender", type: "Casas", price: "100.50", currency: "USD", latitude: "-5.19", longitude: "-80.63", coordinatesConfirmed: "true" }).forEach(([k, v]) => data.set(k, v));
   data.append("images", photo());
   return data;
 }
@@ -51,6 +51,21 @@ beforeEach(() => {
     }),
     storage: { from: mock.storageFrom },
     rpc: mock.finalize,
+  });
+});
+
+describe("publication contact phone", () => {
+  it("persists normalized listing phone in the draft insert without profile writes", async () => {
+    const response = await POST(request(form()));
+    expect(response.status).toBe(200);
+    expect(mock.property).toHaveBeenCalledWith(expect.objectContaining({ contact_phone: "+51900000001" }));
+  });
+  it.each(["", "123", "abc", "javascript:alert(1)", "+51900000001?text=bad", "+1234567890123456"])("rejects invalid phone before writes: %s", async value => {
+    const data = form(); data.set("contact_phone", value);
+    await reject(data);
+  });
+  it("rejects missing listing phone before writes", async () => {
+    const data = form(); data.delete("contact_phone"); await reject(data);
   });
 });
 
