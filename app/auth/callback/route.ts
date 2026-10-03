@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { safeReturnTo } from "../../lib/safe-return";
+import { authOrigin } from "../../lib/auth-origin";
 
 const DIAGNOSTIC_PREFIX = "[AUTH_CALLBACK_DIAG]";
 const SAFE_ERROR_NAMES = new Set([
@@ -33,9 +34,10 @@ function hasVerifierCookie(request: NextRequest, url: string | undefined) {
 
 export async function GET(request: NextRequest) {
   const destination = safeReturnTo(request.nextUrl.searchParams.get("returnTo"));
-  const origin = process.env.NODE_ENV === "production" ? "https://inmueblesdirectos.com" : request.nextUrl.origin;
+  const origin = authOrigin(request.nextUrl.origin);
   const response = NextResponse.redirect(new URL(destination, origin));
-  const errorUrl = new URL("/login?error=confirmation", origin);
+  const recoveryRequested = destination === "/restablecer-password";
+  const errorUrl = new URL(recoveryRequested ? "/recuperar-password?error=recovery" : "/login?error=confirmation", origin);
   const code = request.nextUrl.searchParams.get("code");
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -64,7 +66,11 @@ export async function GET(request: NextRequest) {
     } });
     exchangeAttempted = true;
     console.info(DIAGNOSTIC_PREFIX, { ...context, phase: "exchange_start", exchangeAttempted });
-    const { error } = await client.auth.exchangeCodeForSession(code);
+    const { data, error } = await client.auth.exchangeCodeForSession(code);
+    // SDK flow context selects UX only; authorization remains verified session-based.
+    if (!error && data && "redirectType" in data && data.redirectType === "recovery") {
+      response.headers.set("location", new URL("/restablecer-password", origin).href);
+    }
     console.info(DIAGNOSTIC_PREFIX, { ...context, phase: "result", exchangeAttempted,
       exchangeResult: error ? "error" : "success", ...(error ? safeErrorCategory(error) : { errorName: "none", errorCode: "none" }),
       cookieWriteCount, redirectBranch: error ? "error" : "success" });
@@ -72,6 +78,7 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.info(DIAGNOSTIC_PREFIX, { ...context, phase: "result", exchangeAttempted,
       exchangeResult: "threw", ...safeErrorCategory(error), cookieWriteCount, redirectBranch: "none" });
+    if (recoveryRequested) return NextResponse.redirect(errorUrl);
     throw error;
   }
 }

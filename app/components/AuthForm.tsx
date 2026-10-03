@@ -2,19 +2,21 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { FormEvent, useState } from "react";
+import { FormEvent, useRef, useState } from "react";
 import { getBrowserClient } from "../lib/auth-client";
 import { safeReturnTo } from "../lib/safe-return";
+import PasswordInput from "./PasswordInput";
 
-export default function AuthForm({ mode, returnTo }: { mode: "login" | "register"; returnTo: string }) {
+export default function AuthForm({ mode, returnTo, passwordUpdated = false }: { mode: "login" | "register"; returnTo: string; passwordUpdated?: boolean }) {
   const router = useRouter();
+  const pending = useRef(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const destination = safeReturnTo(returnTo);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (busy) return;
+    if (pending.current) return;
     const client = getBrowserClient();
     if (!client) { setMessage("El servicio de cuentas no está disponible."); return; }
     const form = new FormData(event.currentTarget);
@@ -27,6 +29,7 @@ export default function AuthForm({ mode, returnTo }: { mode: "login" | "register
       if (password.length < 8) { setMessage("La contraseña debe tener al menos 8 caracteres."); return; }
       if (password !== form.get("confirm_password")) { setMessage("Las contraseñas no coinciden."); return; }
     }
+    pending.current = true;
     setBusy(true);
     setMessage("");
     try {
@@ -45,7 +48,7 @@ export default function AuthForm({ mode, returnTo }: { mode: "login" | "register
         else setMessage("Revisa tu correo para confirmar la cuenta y luego inicia sesión.");
       }
     } catch { setMessage("No pudimos conectar con el servicio. Inténtalo más tarde."); }
-    finally { setBusy(false); }
+    finally { pending.current = false; setBusy(false); }
   }
 
   return <main className="auth-page"><Link href="/" className="geo-logo" aria-label="Inmuebles Directos Perú, inicio">Inmuebles<span> Directos</span><small>Perú</small></Link>
@@ -53,11 +56,12 @@ export default function AuthForm({ mode, returnTo }: { mode: "login" | "register
       <form onSubmit={submit} aria-busy={busy}>
         {mode === "register" && <label>Nombre completo<input name="full_name" autoComplete="name" required maxLength={120} disabled={busy} /></label>}
         <label>Correo electrónico<input name="email" type="email" autoComplete="email" required disabled={busy} /></label>
-        <label>Contraseña<input name="password" type="password" autoComplete={mode === "login" ? "current-password" : "new-password"} required minLength={mode === "register" ? 8 : undefined} disabled={busy} /></label>
-        {mode === "register" && <label>Confirmar contraseña<input name="confirm_password" type="password" autoComplete="new-password" required disabled={busy} /></label>}
+        <PasswordInput label="Contraseña" name="password" autoComplete={mode === "login" ? "current-password" : "new-password"} minLength={mode === "register" ? 8 : undefined} disabled={busy} describedBy="auth-feedback" />
+        {mode === "register" && <PasswordInput label="Confirmar contraseña" name="confirm_password" autoComplete="new-password" disabled={busy} describedBy="auth-feedback" />}
         <button type="submit" disabled={busy}>{busy ? "Espera…" : mode === "login" ? "Entrar" : "Crear cuenta"}</button>
       </form>
-      {message && <p role="status" className="auth-message">{message}</p>}
+      <p id="auth-feedback" role="status" className="auth-message">{message || (mode === "login" && passwordUpdated ? "Tu contraseña fue actualizada. Ya puedes iniciar sesión." : "")}</p>
+      {mode === "login" && <p><Link href="/recuperar-password">¿Olvidaste tu contraseña?</Link></p>}
       <p>{mode === "login" ? "¿Aún no tienes cuenta?" : "¿Ya tienes cuenta?"} <Link href={`${mode === "login" ? "/registro" : "/login"}?returnTo=${encodeURIComponent(destination)}`}>{mode === "login" ? "Crear cuenta" : "Iniciar sesión"}</Link></p>
     </section>
   </main>;
