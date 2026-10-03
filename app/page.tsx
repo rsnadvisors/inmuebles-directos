@@ -7,6 +7,7 @@ import Link from "next/link";
 import { getBrowserClient } from "./lib/auth-client";
 import { Listing, compactLocation, comparisonAttributes, filterAndSortListings, formatPrice, isMappable, normalizeInventory, previewLocation, primaryImage, propertyIcon, propertyTypes } from "./lib/inventory";
 import SiteHeader from "./components/SiteHeader";
+import PropertyContactActions from "./components/PropertyContactActions";
 
 const PiuraMap = dynamic(() => import("./PiuraMap"), { ssr: false });
 
@@ -65,7 +66,7 @@ export default function Home() {
       setAllListings([]);
       setSelected(null);
       try {
-        const { data, error } = await supabase.from("properties").select("id,title,slug,status,listing_type,property_type,price,currency,area_total_m2,address,district,city,region,country,description,bedrooms,bathrooms,parking_spaces,lat,lng,published_at,property_images(id,storage_bucket,public_url,alt_text,sort_order,is_cover)").eq("status", "published");
+        const { data, error } = await supabase.from("properties").select("id,title,slug,status,contact_phone,listing_type,property_type,price,currency,area_total_m2,address,district,city,region,country,description,bedrooms,bathrooms,parking_spaces,lat,lng,published_at,property_images(id,storage_bucket,public_url,alt_text,sort_order,is_cover)").eq("status", "published");
         if (!active || request !== requestSequence) return;
         if (error) throw error;
         setAllListings(normalizeInventory(data));
@@ -139,6 +140,7 @@ export default function Home() {
         {selected.description && <p className="drawer-description">{selected.description}</p>}
         <div className="drawer-location"><span aria-hidden="true">⌖</span> {previewLocation(selected)}</div><ListingAttributes listing={selected} context="drawer" />
         <div className="drawer-actions">{selected.slug && <Link className="drawer-primary-action" href={`/inmueble/${selected.slug}`}>Ficha completa</Link>}{selected.coords && <button className="drawer-secondary-action" type="button" onClick={() => closeDrawer(true)}>Ver mapa</button>}</div>
+        <PropertyContactActions phone={selected.contactPhone} title={selected.title} status={selected.status} />
       </div>}
       {selected && galleryOpen && <div className="gallery-modal" role="dialog" aria-modal="true" aria-label={`Galería de ${selected.title}`}><button type="button" className="gallery-modal-close" onClick={() => setGalleryOpen(false)} aria-label="Cerrar galería">×</button><button type="button" className="gallery-prev" onClick={() => setGalleryIndex((galleryIndex - 1 + selected.images.length) % selected.images.length)} aria-label="Imagen anterior">‹</button><img src={selected.images[galleryIndex]} alt={selected.title} /><button type="button" className="gallery-next" onClick={() => setGalleryIndex((galleryIndex + 1) % selected.images.length)} aria-label="Imagen siguiente">›</button><span>{galleryIndex + 1} / {selected.images.length}</span></div>}
     </main>

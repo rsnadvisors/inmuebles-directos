@@ -1,3 +1,4 @@
+import { normalizeContactPhone } from "./contact-phone";
 import { resolvePropertyImage } from "./property-image-source";
 
 export type Currency = "PEN" | "USD" | null;
@@ -42,6 +43,7 @@ export type Listing = {
   locationParts: ListingLocation;
   location: string;
   publishedAt: string | null;
+  contactPhone: string | null;
 };
 export type MappableListing = Listing & { coords: [number, number] };
 export function propertyIcon(type: Listing["type"]): string {
@@ -140,7 +142,7 @@ export function normalizeListing(value: unknown): Listing | null {
     price: optionalNumber(item.price), area: optionalNumber(item.area_total_m2),
     builtArea: optionalNumber(item.area_built_m2), maintenanceFee: optionalNumber(item.maintenance_fee),
     currency: item.currency === "PEN" || item.currency === "USD" ? item.currency : null,
-    zone, locationParts, location,
+    zone, locationParts, location, contactPhone: normalizeContactPhone(item.contact_phone),
     description: text(item.description), slug: text(item.slug) || undefined, status: text(item.status) || undefined,
     bedrooms: optionalNumber(item.bedrooms), bathrooms: optionalNumber(item.bathrooms), parkingSpaces: optionalNumber(item.parking_spaces),
     floors: optionalNumber(item.floors), publishedAt: text(item.published_at) || null,

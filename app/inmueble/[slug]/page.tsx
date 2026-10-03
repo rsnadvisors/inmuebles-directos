@@ -5,6 +5,7 @@ import { getPublishedListing } from "../../lib/property";
 import PropertyGallery from "./PropertyGallery";
 import PropertyMap from "./PropertyMap";
 import SiteHeader from "../../components/SiteHeader";
+import PropertyContactActions from "../../components/PropertyContactActions";
 
 type PageProps = { params: Promise<{ slug: string }> };
 
@@ -70,6 +71,7 @@ export default async function PropertyPage({ params }: PageProps) {
         {property.description && <section className="property-full-section"><h2>Descripción</h2><p className="property-full-description">{property.description}</p></section>}
         {isMappable(property) && <section className="property-full-section"><h2>Ubicación</h2><PropertyMap property={property} /></section>}
         {date && <section className="property-full-section property-full-publication"><h2>Publicación</h2><p>Publicado el {date}</p></section>}
+        <PropertyContactActions phone={property.contactPhone} title={property.title} status={property.status} />
       </div>
     </article>
   </main>;
