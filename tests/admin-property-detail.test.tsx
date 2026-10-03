@@ -50,12 +50,19 @@ it.each([401, 403, 503] as const)("keeps invalid IDs behind authorization %s", a
   expect(stubs.rpc).not.toHaveBeenCalled();
   expect(screen.queryByText("Registro no encontrado")).toBeNull();
 });
-it.each([[properties[1]], properties])("fails closed if a detail RPC returns a mismatched or broad payload %#", async data => {
+it.each([
+  { label: "mismatched-property", data: [properties[1]] },
+  { label: "broad-inventory", data: properties },
+])("fails closed if a detail RPC returns $label payload", async ({ data }) => {
   stubs.rpc.mockResolvedValue({ data, error: null });
   render(await detail(a));
+  expect(stubs.rpc).toHaveBeenCalledTimes(1);
+  expect(stubs.rpc).toHaveBeenCalledWith("admin_properties", expect.objectContaining({ p_id: a }));
+  await expect(stubs.rpc.mock.results[0].value).resolves.toEqual({ data, error: null });
   expect(screen.getByRole("alert")).not.toBeNull();
   expect(screen.queryByText(properties[0].title)).toBeNull();
   expect(screen.queryByText(properties[1].title)).toBeNull();
+  expect(screen.queryByRole("link", { name: /Ver ficha pública/ })).toBeNull();
 });
 it("does not retain property A when the next server render has an invalid ID", async () => {
   const view = render(await detail(a));
