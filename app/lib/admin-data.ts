@@ -57,6 +57,15 @@ export async function readAdminProperties(params: AdminParams): Promise<AdminPag
   const payload = await readAdminRpc("admin_properties", { p_limit: pageSize + 1, p_before: p.before, p_before_id: p.beforeId, p_search: p.q, p_status: p.status, p_listing: p.listing, p_type: p.type, p_city: p.city, p_district: p.district, p_owner: null, p_ownerless: p.ownerless, p_from: null, p_to: null, p_id: p.id });
   return page(payload, normalizeAdminProperty);
 }
+/** Detail IDs are required; never interpret an invalid ID as an inventory filter. */
+export async function readAdminProperty(id: string): Promise<AdminProperty | null> {
+  await requireDashboardAdmin();
+  const requested = id.trim().toLowerCase();
+  if (!uuid.test(requested)) return null;
+  const { rows } = await readAdminProperties({ id: requested });
+  if (rows.length > 1 || (rows[0] && rows[0].id.toLowerCase() !== requested)) throw new AdminReadError();
+  return rows[0] ?? null;
+}
 export async function readAdminUsers(params: AdminParams): Promise<AdminPage<AdminUser>> {
   const p = parseAdminParams(params, "users");
   return page(await readAdminRpc("admin_users", { p_limit: pageSize + 1, p_before: p.before, p_before_id: p.beforeId, p_search: p.q, p_user: null }), normalizeAdminUser);
