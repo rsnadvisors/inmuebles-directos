@@ -1,10 +1,11 @@
-import { imageExtensions, MAX_REQUEST_BYTES, PublicationValidationError, validatePublication } from "../../lib/publication";
+import { MAX_REQUEST_BYTES, PublicationValidationError, validatePublication } from "../../lib/publication";
+import { preparePublication, inspectPublication, finalizePublication, PublicationBoundaryError,
+  PUBLICATION_REQUEST_ID, type PublicationPlan } from "../../lib/publication-boundary-server";
 import { getVerifiedUser } from "../../lib/auth-server";
 import { PRIVATE_PROPERTY_IMAGE_BUCKET, anonymousImageClient, loadPublishedPrivateImage } from "../../lib/property-images";
 
 export const runtime = "nodejs";
 const failure = (code: string, message: string, status: number) => Response.json({ ok: false, code, message }, { status });
-const PUBLICATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 class BodyTooLarge extends Error {}
 
 async function deliveryAvailable(imageId: string | null): Promise<boolean> {
@@ -55,90 +56,48 @@ export async function POST(request: Request): Promise<Response> {
     return failure("INVALID_REQUEST", "No se pudo leer el formulario.", 400);
   }
   const suppliedId = request.headers.get("x-publication-request-id");
-  if (suppliedId !== null && !PUBLICATION_ID.test(suppliedId)) {
+  if (suppliedId !== null && !PUBLICATION_REQUEST_ID.test(suppliedId)) {
     return failure("INVALID_REQUEST", "El identificador de publicación no es válido.", 400);
   }
-  let propertyId: string | null = null;
-  let primaryImageId: string | null = null;
-  const attemptedPaths: string[] = [];
-  let stage: "create" | "upload" | "metadata" | "finalize" | "delivery" = "create";
-  const slug = `${input.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "propiedad"}-${suppliedId ?? crypto.randomUUID()}`;
-  const publishedResult = async (resolvedSlug: string) => {
-    if (!primaryImageId) return Response.json({ ok: true, status: "published", slug: resolvedSlug, imageDelivery: "not_checked" });
-    const delivered = await deliveryAvailable(primaryImageId);
+  const requestId = suppliedId ?? crypto.randomUUID();
+  let plan: PublicationPlan | null = null;
+  const publishedResult = async (published: PublicationPlan) => {
+    const delivered = await deliveryAvailable(published.slots[0].imageId);
     return Response.json(delivered
-      ? { ok: true, status: "published", slug: resolvedSlug }
-      : { ok: true, status: "published", slug: resolvedSlug, imageDelivery: "unconfirmed" });
+      ? { ok: true, status: "published", slug: published.slug }
+      : { ok: true, status: "published", slug: published.slug, imageDelivery: "unconfirmed" });
   };
   try {
-    const { files, ...propertyFields } = input;
-    if (suppliedId) {
-      const existing = await supabase.from("properties").select("id,status,slug")
-        .eq("id", suppliedId).eq("owner_id", user.id).maybeSingle();
-      if (existing.error) throw new Error("Publication lookup failed");
-      if (existing.data?.status === "published") return await publishedResult(existing.data.slug);
-      if (existing.data) return failure("PUBLICATION_IN_PROGRESS", "Revisa la publicación existente en Mis propiedades.", 409);
+    plan = await preparePublication(supabase, user.id, requestId, input);
+    if (plan.state === "FINALIZED") return await publishedResult(plan);
+    if (plan.state !== "ACTIVE") throw new PublicationBoundaryError(plan.state === "CANCELLED" ? "PUBLICATION_CANCELLED" : "CANCELLATION_PENDING", 409);
+    if (!plan.parentValid || plan.slots.some(s => !s.metadataValid || s.state !== "RESERVED" || s.observation === "INACCESSIBLE")) {
+      throw new PublicationBoundaryError("RECONCILIATION_UNAVAILABLE");
     }
-    const { data: property, error } = await supabase.from("properties").insert({ ...propertyFields,
-      ...(suppliedId ? { id: suppliedId } : {}), slug, country: "Peru", owner_id: user.id,
-      agent_id: null, status: "draft", published_at: null }).select("id").single();
-    if (error || !property?.id) throw new Error("Draft creation failed");
-    propertyId = property.id;
-    for (const [index, file] of files.entries()) {
-      const path = `${user.id}/${property.id}/${crypto.randomUUID()}.${imageExtensions[file.type as keyof typeof imageExtensions]}`;
-      attemptedPaths.push(path);
-      stage = "upload";
-      const upload = await supabase.storage.from(PRIVATE_PROPERTY_IMAGE_BUCKET).upload(path, file, { contentType: file.type, upsert: false });
-      if (upload.error) throw new Error("Upload failed");
-      stage = "metadata";
-      const image = await supabase.from("property_images").insert({ property_id: property.id, storage_bucket: PRIVATE_PROPERTY_IMAGE_BUCKET, storage_path: path, public_url: null, sort_order: index, is_cover: index === 0 }).select("id").single();
-      if (image.error || !image.data?.id) throw new Error("Image metadata failed");
-      if (index === 0) primaryImageId = image.data.id;
-    }
-    stage = "finalize";
-    const finalized = await supabase.rpc("finalize_private_property_publication", { p_property_id: property.id });
-    if (finalized.error || finalized.data !== slug) throw new Error("Finalization failed");
-    stage = "delivery";
-    return await publishedResult(slug);
-  } catch {
-    if (!propertyId) {
-      if (suppliedId) {
-        try {
-          const existing = await supabase.from("properties").select("id,status,slug")
-            .eq("id", suppliedId).eq("owner_id", user.id).maybeSingle();
-          if (!existing.error && existing.data?.status === "published") return await publishedResult(existing.data.slug);
-          if (!existing.error && existing.data) return failure("PUBLICATION_IN_PROGRESS", "Revisa la publicación existente en Mis propiedades.", 409);
-        } catch { /* the result remains uncertain; never insert again here */ }
+    for (const [index, slot] of plan.slots.entries()) {
+      if (slot.observation === "PRESENT") continue;
+      const upload = await supabase.storage.from(PRIVATE_PROPERTY_IMAGE_BUCKET).upload(slot.path, input.files[index],
+        { contentType: slot.mime, upsert: false });
+      // A conflict/timeout may hide a committed object. Reconcile rather than
+      // overwrite or allocate another path; there is no automatic second upload.
+      plan = await inspectPublication(supabase, user.id, requestId, plan.fingerprint);
+      if (plan.state !== "ACTIVE" || !plan.parentValid || plan.slots.some(s => !s.metadataValid)
+        || plan.slots[index].observation !== "PRESENT") {
+        throw new PublicationBoundaryError(upload.error ? "UPLOAD_FAILED" : "RECONCILIATION_UNAVAILABLE", 502);
       }
-      return failure("DRAFT_CREATE_UNCERTAIN", "No pudimos confirmar la creación del borrador. Revisa Mis propiedades antes de volver a intentar.", 502);
     }
-    // The RPC has committed. Never clean up or retry writes on a delivery
-    // failure; the user must inspect the existing listing before trying again.
-    if (stage === "delivery") return publishedResult(slug);
-    if (stage === "finalize") {
-      // A lost RPC response may hide a committed publication. Verify before
-      // claiming that the listing is unpublished or attempting cleanup.
+    const published = await finalizePublication(supabase, user.id, plan);
+    if (published.state !== "FINALIZED") throw new PublicationBoundaryError("RECONCILIATION_UNAVAILABLE");
+    return await publishedResult(published);
+  } catch (error) {
+    if (plan) {
       try {
-        const result = await supabase.from("properties").select("status,slug").eq("id", propertyId).maybeSingle();
-        if (!result.error && result.data?.status === "published") {
-          return publishedResult(result.data.slug);
-        }
-        if (result.error || !result.data || result.data.status !== "draft") return failure("FINALIZATION_UNCERTAIN", "No pudimos confirmar el resultado. Revisa Mis propiedades antes de volver a intentar.", 502);
-      } catch { return failure("FINALIZATION_UNCERTAIN", "No pudimos confirmar el resultado. Revisa Mis propiedades antes de volver a intentar.", 502); }
+        const existing = await inspectPublication(supabase, user.id, requestId, plan.fingerprint);
+        if (existing.state === "FINALIZED") return await publishedResult(existing);
+      } catch { /* UNKNOWN retains the same attempt and quota; never delete here. */ }
     }
-    // Cleanup is best effort and runs only while the row is still a draft.
-    // RLS denies removing Storage objects or rows after publication.
-    try {
-      if (attemptedPaths.length) {
-        const removed = await supabase.storage.from(PRIVATE_PROPERTY_IMAGE_BUCKET).remove(attemptedPaths);
-        if (removed.error) throw new Error("Storage cleanup failed");
-      }
-      const images = await supabase.from("property_images").delete().eq("property_id", propertyId);
-      if (images.error) throw new Error("Metadata cleanup failed");
-      const property = await supabase.from("properties").delete().eq("id", propertyId);
-      if (property.error) throw new Error("Draft cleanup failed");
-    } catch { console.error("Publication draft cleanup incomplete", { propertyId }); }
-    const code = stage === "upload" ? "UPLOAD_FAILED" : stage === "metadata" ? "METADATA_FAILED" : "FINALIZATION_FAILED";
-    return failure(code, "No se publicó la propiedad. Revisa Mis propiedades antes de volver a intentar.", 502);
+    const code = error instanceof PublicationBoundaryError ? error.code : "RECONCILIATION_UNAVAILABLE";
+    const status = error instanceof PublicationBoundaryError ? error.status : 503;
+    return failure(code, "No pudimos completar o confirmar el intento. Conserva estos datos para reintentarlo o solicita cancelar el intento pendiente.", status);
   }
 }

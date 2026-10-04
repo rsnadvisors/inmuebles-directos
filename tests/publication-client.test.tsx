@@ -193,9 +193,10 @@ describe("submission lifecycle", () => {
     ["photo bytes", () => {}, () => pick([bytesPhoto([1, 2, 3, 4])])],
     ["photo MIME type", () => {}, () => pick([photo("image/jpeg")])],
     ["photo order", () => pick([bytesPhoto([1]), bytesPhoto([2])]), () => pick([bytesPhoto([2]), bytesPhoto([1])])],
-  ] as const)("blocks changed %s until an explicit reviewed reset", async (_label, initial, edit) => {
+  ] as const)("blocks changed %s until server-confirmed cancellation", async (_label, initial, edit) => {
     ready(); initial();
     vi.mocked(fetch).mockResolvedValueOnce(reply({ ok: false, code: "UNKNOWN" }, 502) as Response)
+      .mockImplementationOnce(async () => reply({ ok: true, state: "CANCELLED", requestId: JSON.parse(window.sessionStorage.getItem("publicationAttempt")!).id }) as Response)
       .mockResolvedValueOnce(reply({ ok: true, status: "published" }) as Response);
     submit(); await screen.findByRole("alert");
     const firstAttempt = window.sessionStorage.getItem("publicationAttempt");
@@ -204,10 +205,12 @@ describe("submission lifecycle", () => {
     await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("publicación anterior pendiente"));
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(window.sessionStorage.getItem("publicationAttempt")).toBe(firstAttempt);
-    fireEvent.click(screen.getByRole("button", { name: "Ya revisé Mis propiedades; iniciar otra publicación" }));
-    expect(window.sessionStorage.getItem("publicationAttempt")).toBeNull();
-    submit(); await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
-    const nextId = (vi.mocked(fetch).mock.calls[1][1]?.headers as Record<string, string>)["X-Publication-Request-Id"];
+    fireEvent.click(screen.getByRole("button", { name: "Cancelar el intento pendiente" }));
+    await waitFor(() => expect(window.sessionStorage.getItem("publicationAttempt")).toBeNull());
+    expect(vi.mocked(fetch).mock.calls[1][0]).toBe("/api/publicar/cancelar");
+    expect(JSON.parse(vi.mocked(fetch).mock.calls[1][1]?.body as string)).toEqual({ requestId: firstId, action: "cancel" });
+    submit(); await waitFor(() => expect(fetch).toHaveBeenCalledTimes(3));
+    const nextId = (vi.mocked(fetch).mock.calls[2][1]?.headers as Record<string, string>)["X-Publication-Request-Id"];
     expect(nextId).not.toBe(firstId);
     await waitFor(() => expect(screen.getByRole("status").textContent).toContain("Propiedad publicada"));
   });
