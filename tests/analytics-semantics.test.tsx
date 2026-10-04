@@ -11,6 +11,77 @@ const unresolved = ["detail_ctr","demand_supply","return_sessions"] as const;
 const discovery = ["inventory_total","inventory_published","inventory_draft","inventory_archived","inventory_reserved","inventory_sold","inventory_rented","listing_creations","publication_records","publication_share","type_mix","operation_mix","currency_mix","location_mix","ask_median","ask_mean","ask_p25","ask_p75","ask_total_m2","ask_built_m2","age_published","image_coverage","area_coverage","contact_coverage","completeness","active_publishers","profile_stock","favorite_stock","legacy_view_rows","legacy_session_rows","legacy_leads","impressions","drawer_opens","detail_views","phone_clicks","whatsapp_clicks","contact_clicks","detail_ctr","contact_rate","zero_results","demand_supply","price_change","time_to_declared_close","seo_clicks","return_sessions","recommendation_count"];
 
 describe("analytics semantic foundation", () => {
+ it("uses current property and image metadata for coverage without behavioral tracking", () => {
+  const m=getMetric("image_coverage");
+  expect(new Set(m.dependencies)).toEqual(new Set(["PROPERTY_CURRENT","IMAGE_METADATA","QUERY_LAYER"]));
+  expect(m).toMatchObject({availability:"AVAILABLE",backfill:"BACKFILLABLE",time:"CURRENT_SNAPSHOT",instrumentationDependent:false,storageDependent:false});
+  expect(getMetricReadiness(m.id)).toBe("READY_AFTER_QUERY_LAYER");
+  expect(getMetricReadiness("impressions")).toBe("REQUIRES_INSTRUMENTATION");
+  // Behavioral-source metadata is unrelated to the coverage source contract.
+  const withoutEventSources=METRICS.map(metric=>metric.id==="impressions" ? {...metric,availability:"UNKNOWN" as const} : metric);
+  expect(validateRegistry(withoutEventSources)).toEqual([]);
+  expect(getMetricReadiness(m.id)).toBe("READY_AFTER_QUERY_LAYER");
+  expect(canRequestMetric(m.id,"SUPER_ADMIN","PLATFORM_AGGREGATE")).toBe(false);
+ });
+ it.each([
+  {dependencies:["ANALYTICS_EVENTS","IMAGE_METADATA","QUERY_LAYER"]},
+  {dependencies:["IMAGE_METADATA","QUERY_LAYER"]},
+  {dependencies:["PROPERTY_CURRENT","QUERY_LAYER"]},
+  {dependencies:["PROPERTY_CURRENT","IMAGE_METADATA"]},
+  {dependencies:["PROPERTY_CURRENT","IMAGE_METADATA","QUERY_LAYER","CONTACT_EVENTS"]},
+  {dependencies:["PROPERTY_CURRENT","IMAGE_METADATA","QUERY_LAYER","SEARCH_EVENTS"]},
+  {dependencies:["PROPERTY_CURRENT","IMAGE_METADATA","QUERY_LAYER","STORAGE_PUBLICATION_INTERNALS"]},
+  {instrumentationDependent:true},
+  {storageDependent:true}
+ ])("rejects invalid current-image source metadata %j", patch => {
+  const copy=METRICS.map(m=>m.id==="image_coverage" ? {...m,...patch} as Metric : m);
+  expect(validateRegistry(copy)).toContain("CURRENT_IMAGE_SOURCE_CONTRACT");
+ });
+ it("also protects other current property/image metadata coverage contracts", () => {
+  const copy=METRICS.map(m=>m.id==="completeness" ? {...m,dependencies:m.dependencies.filter(d=>d!=="PROPERTY_CURRENT")} : m);
+  expect(validateRegistry(copy)).toContain("CURRENT_IMAGE_SOURCE_CONTRACT");
+ });
+ it("enables only Discovery Publishers and report-8 administrative breakdowns", () => {
+  const intended=["inventory_total","image_coverage","contact_rate"];
+  expect(getDimension("publisher")).toMatchObject({privacy:"SENSITIVE_INTERNAL",grants:[{role:"SUPER_ADMIN",scopes:["PLATFORM_AGGREGATE"]}],families:["INVENTORY","QUALITY","DEMAND"]});
+  expect(METRICS.filter(m=>isDimensionAllowedForMetric("publisher",m.id,"SUPER_ADMIN","PLATFORM_AGGREGATE")).map(m=>m.id).sort()).toEqual(intended.sort());
+  const screen=SCREEN_TRACEABILITY.find(s=>s.id==="publishers");
+  expect(screen.requiredMetrics).toContain("active_publishers");
+  expect(screen.publisherBreakdownMetrics).toEqual(["inventory_total","image_coverage"]);
+  for(const id of screen.publisherBreakdownMetrics) {
+   expect(screen.requiredMetrics).toContain(id);
+   expect(isDimensionAllowedForMetric("publisher",id,screen.role,"PLATFORM_AGGREGATE")).toBe(true);
+  }
+  expect(getMetricReadiness("contact_rate")).toBe("REQUIRES_INSTRUMENTATION");
+  expect(canRequestMetric("contact_rate","SUPER_ADMIN","PLATFORM_AGGREGATE")).toBe(false);
+ });
+ it.each(["STANDARD_USER", "ANONYMOUS", "unknown", null])("denies publisher metadata and every breakdown for role %s", role => {
+  expect(getDimensionsForRole(role).map(d=>d.id)).not.toContain("publisher");
+  expect(getMetricsForRole(role).every(m=>!m.dimensions.includes("publisher"))).toBe(true);
+  for(const m of METRICS) for(const scope of ["PLATFORM_AGGREGATE","OWN_PROPERTY","PRIVACY_SAFE_BENCHMARK"]) expect(isDimensionAllowedForMetric("publisher",m.id,role,scope)).toBe(false);
+ });
+ it.each(["active_publishers","ask_median","inventory_published","area_coverage","profile_stock","impressions","detail_ctr","missing"])("does not expand publisher compatibility to %s", id => {
+  expect(isDimensionAllowedForMetric("publisher",id,"SUPER_ADMIN","PLATFORM_AGGREGATE")).toBe(false);
+ });
+ it("keeps active publishers as a distinct-owner aggregate, not self-grouped counts", () => {
+  expect(getMetric("active_publishers")).toMatchObject({aggregation:"DISTINCT_COUNT",formula:{kind:"DISTINCT",definition:"distinct owner_id no null"},dependencies:["PROPERTY_CURRENT","QUERY_LAYER"]});
+  expect(getMetric("active_publishers").dimensions).not.toContain("publisher");
+  expect(getMetricReadiness("active_publishers")).toBe("READY_AFTER_QUERY_LAYER");
+  expect(isMetricAllowedForRole("active_publishers","SUPER_ADMIN","PLATFORM_AGGREGATE")).toBe(true);
+  const expanded=METRICS.map(m=>m.id==="active_publishers" ? {...m,dimensions:[...m.dimensions,"publisher"]} as Metric : m);
+  expect(validateRegistry(expanded)).toContain("PUBLISHER_COMPATIBILITY_CONTRACT");
+ });
+ it("rejects removed or invented publisher relationships", () => {
+  const removed=METRICS.map(m=>m.id==="inventory_total" ? {...m,dimensions:m.dimensions.filter(d=>d!=="publisher")} : m);
+  expect(validateRegistry(removed)).toContain("PUBLISHER_COMPATIBILITY_CONTRACT");
+  const expanded=METRICS.map(m=>m.id==="inventory_published" ? {...m,dimensions:[...m.dimensions,"publisher"]} as Metric : m);
+  expect(validateRegistry(expanded)).toContain("PUBLISHER_COMPATIBILITY_CONTRACT");
+ });
+ it("rejects publisher role or privacy weakening", () => {
+  const copy=DIMENSIONS.map(d=>d.id==="publisher" ? {...d,grants:[{role:"STANDARD_USER" as const,scopes:["OWN_PROPERTY" as const]}]} : d);
+  expect(validateRegistry(METRICS,copy)).toContain("PUBLISHER_PRIVACY_CONTRACT");
+  expect(validateRegistry(METRICS,DIMENSIONS.map(d=>d.id==="publisher" ? {...d,privacy:"USER_PRIVATE" as const} : d))).toContain("PUBLISHER_PRIVACY_CONTRACT");
+ });
  it("reconciles exactly the 46 authoritative IDs", () => {
   expect([...METRIC_IDS].sort()).toEqual([...discovery].sort());
   expect(METRICS.map(m=>m.id).sort()).toEqual([...discovery].sort());

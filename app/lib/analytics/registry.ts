@@ -41,7 +41,8 @@ export const METRICS: readonly Metric[] = freeze([
   "region",
   "city",
   "district",
-  "property"
+  "property",
+  "publisher"
  ],
  "dependencies": [
   "PROPERTY_CURRENT",
@@ -1464,10 +1465,11 @@ export const METRICS: readonly Metric[] = freeze([
   "region",
   "city",
   "district",
-  "property"
+  "property",
+  "publisher"
  ],
  "dependencies": [
-  "ANALYTICS_EVENTS",
+  "PROPERTY_CURRENT",
   "IMAGE_METADATA",
   "QUERY_LAYER"
  ],
@@ -2501,7 +2503,8 @@ export const METRICS: readonly Metric[] = freeze([
  "dimensions": [
   "property",
   "date",
-  "surface"
+  "surface",
+  "publisher"
  ],
  "dependencies": [
   "ANALYTICS_EVENTS",
@@ -3449,13 +3452,8 @@ export const DIMENSIONS: readonly Dimension[] = freeze([
   "storageDependent": false,
   "families": [
    "INVENTORY",
-   "PRICING",
    "QUALITY",
-   "AUDIENCE",
-   "DEMAND",
-   "HISTORY",
-   "SEO",
-   "RECOMMENDATION"
+   "DEMAND"
   ]
  },
  {

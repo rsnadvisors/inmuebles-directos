@@ -89,3 +89,22 @@ Future publication-boundary/Storage telemetry is explicitly outside this 46-metr
 SU-494532 acknowledgment does not authorize Expand.
 
 Run focused tests: `npm test -- tests/analytics-semantics.test.tsx`.
+
+## Current image sources and administrative publisher compatibility
+
+Discovery §32 defines image coverage from current properties and image metadata,
+pending the query layer. Behavioral events and binary Storage are not sources.
+Validation rejects missing numerator/denominator sources and event/Storage coupling
+for current property/image metadata contracts; invalid image sources are non-ready.
+
+Discovery §50 Publishers requires active_publishers, inventory_total and image_coverage;
+The distinct-owner KPI remains aggregate; it is not grouped by its own publisher identity.
+§39 report 8 additionally names contact_rate by internal owner. Only inventory_total,
+image_coverage and contact_rate
+allow publisher, only for SUPER_ADMIN / PLATFORM_AGGREGATE. Publisher identifiers remain
+sensitive internal pseudonyms, never emails or phones. Self-grouping active_publishers
+would produce trivial per-publisher counts and is denied. Ownerless stock
+must remain a separate future query-layer group, not a fabricated publisher identity.
+contact_rate remains untracked and non-calculable pending instrumentation. Compatibility
+does not imply readiness. Standard-user metadata omits administrative-only dimensions.
+Server getUser + dashboard_access and DB authorization remain mandatory and unchanged.

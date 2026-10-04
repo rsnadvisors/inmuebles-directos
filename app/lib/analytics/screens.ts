@@ -1,5 +1,5 @@
 import { freeze, type MetricId, type Role } from "./contract";
-export type ScreenTrace = Readonly<{ id: string; role: Role; requiredMetrics: readonly MetricId[]; blockedMetrics: readonly MetricId[]; nonMetricDependencies: readonly ("ALLOWLISTED_QUERY_LAYER" | "SAVED_REPORT_DEFINITIONS")[] }>;
+export type ScreenTrace = Readonly<{ id: string; role: Role; requiredMetrics: readonly MetricId[]; publisherBreakdownMetrics?: readonly MetricId[]; blockedMetrics: readonly MetricId[]; nonMetricDependencies: readonly ("ALLOWLISTED_QUERY_LAYER" | "SAVED_REPORT_DEFINITIONS")[] }>;
 /** Discovery traceability, NOT rendered screens or an executable report definition.
  * Readiness for every metric must be checked; blockedMetrics are never usable.
  */
@@ -76,6 +76,8 @@ export const SCREEN_TRACEABILITY: readonly ScreenTrace[] = freeze([
    "inventory_total",
    "image_coverage"
   ],
+  // Distinct-owner KPI is an aggregate; stock/coverage are publisher breakdowns.
+  "publisherBreakdownMetrics": ["inventory_total", "image_coverage"],
   "blockedMetrics": [],
   "nonMetricDependencies": []
  },
