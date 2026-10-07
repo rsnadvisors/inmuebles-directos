@@ -17,7 +17,16 @@ export async function adminBoundary(load: () => Promise<React.ReactNode>, destin
     return <AdminNotice status={503} />;
   }
 }
-export function Overview({ summary }: { summary: AdminSummary }) {
+export function Overview({ summary, inventoryOverview }: { summary: AdminSummary | null; inventoryOverview?: React.ReactNode }) {
+  if (inventoryOverview !== undefined) return <><header className="admin-heading"><p className="admin-eyebrow">Vista general · Solo lectura</p><h1>Resumen</h1><p>Consulta el inventario y las cuentas sin modificar sus datos.</p></header>
+   {inventoryOverview}
+   <details className="admin-panel inventory-bi-legacy"><summary>Registros administrativos existentes</summary><p className="admin-muted">Estos registros operativos están separados del inventario BI.</p>
+    {summary ? <><h2>Perfiles</h2><p>{summary.counts.profiles_total.toLocaleString("es-PE")}</p><h2>Actividad registrada</h2><dl className="admin-breakdown">
+     {[["Creadas hoy (Lima)", "today"], ["Creadas en 7 días", "7d"], ["Creadas en 30 días", "30d"], ["Registros de vistas", "views_raw_count"], ["Registros de consultas", "leads_raw_count"], ["Favoritos", "favorites_count"]].map(([label,key]) => <div key={key}><dt>{label}</dt><dd>{summary.counts[key]}</dd></div>)}
+    </dl><p className="admin-muted">Vistas y consultas son conteos de registros, no personas únicas.</p></>
+     : <p role="alert">No pudimos cargar los registros administrativos. Inténtalo más tarde.</p>}
+   </details></>;
+  if (!summary) return <AdminNotice status={503} />;
   const c = summary.counts;
   const metrics = [["Propiedades", "properties_total"], ["Publicadas", "published"], ["Borradores", "draft"], ["Perfiles", "profiles_total"]];
   return <><header className="admin-heading"><p className="admin-eyebrow">Vista general · Solo lectura</p><h1>Resumen</h1><p>Consulta el inventario y las cuentas sin modificar sus datos.</p></header><section className="admin-metrics" aria-label="Indicadores principales">{metrics.map(([label, key]) => <article key={key}><span>{label}</span><strong>{c[key].toLocaleString("es-PE")}</strong></article>)}</section>
