@@ -7,6 +7,7 @@ import Account from "../app/cuenta/page";
 import AdminPage from "../app/admin/page";
 import type { InventoryQueryResult, InventoryScope, InventoryResponse } from "../app/lib/analytics/inventory-query-contract";
 import type { DashboardMetric } from "../app/lib/analytics/inventory-dashboard-view";
+import { parseInventoryDashboardFilters } from "../app/lib/analytics/inventory-dashboard-view";
 import { readFileSync } from "node:fs";
 
 const stubs=vi.hoisted(()=>({verified:vi.fn(),query:vi.fn(),rpc:vi.fn(),profile:vi.fn(),legacy:vi.fn(),redirect:vi.fn()}));
@@ -59,8 +60,8 @@ describe("server-only UI composition",()=>{
   expect(peak).toBeLessThanOrEqual(2);expect(peak).toBe(2);
  });
  it("client arguments cannot choose role or owner",async()=>{
-  await Reflect.apply(loadOwnInventoryOverview,null,[{scope:"PLATFORM_AGGREGATE",owner_id:"B"}]);
-  expect(stubs.query.mock.calls.every(([,scope])=>scope==="OWN_PROPERTY")).toBe(true);
+  await expect(Reflect.apply(loadOwnInventoryOverview,null,[{scope:"PLATFORM_AGGREGATE",owner_id:"B"}])).rejects.toThrow();
+  expect(stubs.query).not.toHaveBeenCalled();
  });
  it("zero cohort skips five additional requests without fabricated readings",async()=>{
   total=0;const view=await loadOwnInventoryOverview();
@@ -114,6 +115,97 @@ describe("server-only UI composition",()=>{
   expect(server).toContain('import "server-only"');expect(server).not.toMatch(/\.from\(|\.rpc\(|\.storage|createClient|process\.env|eval\(/);
   const presentation=readFileSync("app/components/analytics/InventoryOverview.tsx","utf8");
   expect(presentation).not.toContain('"use client"');expect(presentation).not.toContain("supabase");
+ });
+});
+
+describe("Phase 2 closed cohort composition",()=>{
+ const rows = [
+  {owner_id:"A",property_type:"house",listing_type:"sale",status:"published",currency:"PEN",images:3},
+  {owner_id:"A",property_type:"house",listing_type:"rent",status:"draft",currency:"USD",images:0},
+  {owner_id:"A",property_type:"land",listing_type:"sale",status:"archived",currency:"USD",images:1},
+  {owner_id:"B",property_type:"house",listing_type:"sale",status:"published",currency:"USD",images:1},
+  {owner_id:null,property_type:"commercial",listing_type:"rent",status:"published",currency:"PEN",images:2},
+ ];
+ it.each([{}, {property_type:"house"}, {operation:"rent"}, {property_type:"house",operation:"sale"}, {property_type:"office",operation:"rent"}])("real adapter verifies AND, ownership, ratios and self-dimension: %j",async input=>{
+  const real=await vi.importActual<typeof import("../app/lib/analytics/inventory-query-server")>("../app/lib/analytics/inventory-query-server");
+  const filters=parseInventoryDashboardFilters(input);
+  const predicates:[string,unknown][][]=[];
+  const client={rpc:stubs.rpc,from:vi.fn(()=>({select:()=>{
+   const p:[string,unknown][]=[];predicates.push(p);let image=false;
+   const q={eq:(k:string,v:unknown)=>{p.push([k,v]);return q;},not:()=>{image=true;return q;},abortSignal:()=>q,
+    then:(done:(r:unknown)=>unknown)=>Promise.resolve({error:null,count:rows.filter(r=>approved||r.owner_id==="A"||r.status==="published").filter(r=>p.every(([k,v])=>r[k as keyof typeof r]===v)&&(!image||r.images>0)).length}).then(done)};
+   return q;
+  }}))};
+  stubs.verified.mockResolvedValue({client,user:{id:"A"}});stubs.query.mockImplementation(real.queryInventory);
+  for(const scope of ["own","platform"] as const){
+   approved=scope==="platform";predicates.length=0;
+   const view=await (approved?loadPlatformInventoryOverview(filters):loadOwnInventoryOverview(filters));
+   const selected=rows.filter(r=>(approved||r.owner_id==="A")&&(!filters.property_type||r.property_type===filters.property_type)&&(!filters.operation||r.listing_type===filters.operation));
+   expect(view.widgets[0].valueText).toBe(String(selected.length));
+   if(!approved)expect(predicates.every(p=>p.some(([k,v])=>k==="owner_id"&&v==="A"))).toBe(true);
+   else expect(predicates.every(p=>!p.some(([k])=>k==="owner_id"))).toBe(true);
+   for(const p of predicates){if(filters.property_type)expect(p).toContainEqual(["property_type",filters.property_type]);if(filters.operation)expect(p).toContainEqual(["listing_type",filters.operation]);}
+   if(selected.length){
+    expect(view.widgets[1].percentage).toBe(selected.filter(r=>r.status==="published").length/selected.length*100);
+    expect(view.widgets.find(w=>w.id==="IMAGE_COVERAGE")?.percentage).toBe(selected.filter(r=>r.images>0).length/selected.length*100);
+    for(const [id,column] of [["TYPE_BREAKDOWN","property_type"],["OPERATION_BREAKDOWN","listing_type"],["STATUS_BREAKDOWN","status"],["CURRENCY_BREAKDOWN","currency"]] as const)
+     for(const row of view.widgets.find(w=>w.id===id)!.rows!)expect(row.count).toBe(selected.filter(r=>r[column]===row.key).length);
+   }else{expect(view.empty).toBe(true);expect(view.widgets[1].state).toBe("no-data");}
+  }
+ });
+ it.each([{}, {property_type:"house"}, {operation:"rent"}, {property_type:"office",operation:"sale"}])("passes the identical finite cohort to all six requests: %j",async input=>{
+  const filters=parseInventoryDashboardFilters(input);
+  stubs.query.mockImplementation(async (request:{metric:DashboardMetric;filters?:typeof filters},scope:InventoryScope)=>{
+   const r=response(request.metric,scope);return r.ok?{...r,result:{...r.result,filters:request.filters??{}}}:r;
+  });
+  const view=await loadOwnInventoryOverview(filters);
+  expect(stubs.query).toHaveBeenCalledTimes(6);
+  for(const [r,s] of stubs.query.mock.calls){expect(r.filters??{}).toEqual(filters);expect(s).toBe("OWN_PROPERTY");}
+  expect(view.filters??{}).toEqual(filters);
+ });
+ it.each([{}, {operation:"sale"}, {property_type:"land"}, {property_type:"house",operation:"rent"}])("approved admin uses the same platform scope: %j",async input=>{
+  approved=true;const filters=parseInventoryDashboardFilters(input);
+  stubs.query.mockImplementation(async (r:{metric:DashboardMetric;filters?:typeof filters},s:InventoryScope)=>{await requireDashboardAdmin();const v=response(r.metric,s);return v.ok?{...v,result:{...v.result,filters:r.filters??{}}}:v;});
+  await loadPlatformInventoryOverview(filters);expect(stubs.query.mock.calls.every(([,s])=>s==="PLATFORM_AGGREGATE")).toBe(true);
+ });
+ it("rejects stale unfiltered results for filtered requests",async()=>{
+  await expect(loadOwnInventoryOverview({operation:"rent"})).rejects.toMatchObject({status:503});
+ });
+ it("rejects additional or different returned filters",async()=>{
+  const r=response("publication_share","OWN_PROPERTY");if(r.ok)stubs.query.mockResolvedValue({...r,result:{...r.result,filters:{operation:"sale"}}});
+  await expect(loadOwnInventoryOverview({operation:"rent"})).rejects.toMatchObject({status:503});
+ });
+ it("rejects an unknown undefined echo key replacing the approved key",async()=>{
+  const r=response("publication_share","OWN_PROPERTY");if(r.ok)stubs.query.mockResolvedValue({...r,result:{...r.result,filters:{unknown:undefined}}});
+  await expect(loadOwnInventoryOverview({operation:"rent"})).rejects.toMatchObject({status:503});
+ });
+ it("filtered QUERY_FAILED remains a local error rather than zero",async()=>{
+  const filters={operation:"rent"} as const;
+  stubs.query.mockImplementation(async (r:{metric:DashboardMetric},s:InventoryScope)=>{
+   if(r.metric==="image_coverage")return {ok:false,code:"QUERY_FAILED"};
+   const v=response(r.metric,s);return v.ok?{...v,result:{...v.result,filters}}:v;
+  });
+  const view=await loadOwnInventoryOverview(filters);expect(view.widgets.find(w=>w.id==="IMAGE_COVERAGE")?.state).toBe("error");expect(view.widgets[0].valueText).toBe("20");
+ });
+ it("filtered late authorization failure suppresses all readings",async()=>{
+  const filters={property_type:"land"} as const;
+  stubs.query.mockImplementation(async (r:{metric:DashboardMetric},s:InventoryScope)=>{
+   if(r.metric==="currency_mix")return {ok:false,code:"FORBIDDEN"};
+   const v=response(r.metric,s);return v.ok?{...v,result:{...v.result,filters}}:v;
+  });
+  await expect(loadOwnInventoryOverview(filters)).rejects.toMatchObject({status:403});
+ });
+ it("filtered empty cohort makes only one request",async()=>{
+  total=0;const r=response("publication_share","OWN_PROPERTY");if(r.ok)stubs.query.mockResolvedValue({...r,result:{...r.result,filters:{operation:"rent"}}});
+  const view=await loadOwnInventoryOverview({operation:"rent"});expect(view.empty).toBe(true);expect(stubs.query).toHaveBeenCalledTimes(1);
+ });
+ it("URL scope injection is refused after account identity and before analytics",async()=>{
+  render(await Account({searchParams:Promise.resolve({owner_id:"other",operation:"sale"})}));
+  expect(screen.getByRole("alert")).toBeTruthy();expect(stubs.query).not.toHaveBeenCalled();
+ });
+ it("a valid filter cannot admit an unapproved admin",async()=>{
+  render(await AdminPage({searchParams:Promise.resolve({operation:"rent"})}));
+  expect(screen.getByText("Acceso restringido")).toBeTruthy();expect(stubs.query).not.toHaveBeenCalled();
  });
 });
 

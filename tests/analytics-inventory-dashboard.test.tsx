@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import { readFileSync } from "node:fs";
-import { buildInventoryDashboardView, type DashboardResponses, type DashboardAudience, type DashboardMetric } from "../app/lib/analytics/inventory-dashboard-view";
+import { buildInventoryDashboardView, parseInventoryDashboardFilters, type DashboardResponses, type DashboardAudience, type DashboardMetric } from "../app/lib/analytics/inventory-dashboard-view";
 import type { InventoryQueryResult, InventoryResponse } from "../app/lib/analytics/inventory-query-contract";
 import InventoryOverview from "../app/components/analytics/InventoryOverview";
 import AccountLoading from "../app/cuenta/loading";
@@ -40,7 +40,7 @@ describe("Phase 1 inventory presentation",()=>{
   expect(screen.getAllByRole("progressbar")).toHaveLength(2);
   expect(screen.getByText("Estado actual")).toBeTruthy();
   expect(screen.getByText("Publicadas")).toBeTruthy();expect(screen.getByText("Archivadas")).toBeTruthy();
-  for(const label of ["Casas","Departamentos","Terrenos","Oficinas","Locales comerciales","Venta","Alquiler","Soles (PEN)","Dólares (USD)"])expect(screen.getByText(label)).toBeTruthy();
+  for(const label of ["Casas","Departamentos","Terrenos","Oficinas","Locales comerciales","Venta","Alquiler","Soles (PEN)","Dólares (USD)"])expect(screen.getAllByText(label).length).toBeGreaterThan(0);
  });
  it("reuses total denominator, not scalar null of a grouped result",()=>{
   const view=show();expect(view.widgets[0].valueText).toBe("20");
@@ -112,8 +112,8 @@ describe("Phase 1 inventory presentation",()=>{
   expect(buildInventoryDashboardView("own",data).queriedText).toBeNull();
   expect(screen.queryByText(/Última actualización|vs. mes|Últimos 30 días/)).toBeNull();
  });
- it("does not render internal states, forbidden analytics or filter controls",()=>{
-  show();expect(document.querySelector("select,input,form")).toBeNull();
+ it("does not render internal states or forbidden analytics",()=>{
+  show();expect(document.querySelectorAll("select")).toHaveLength(2);expect(document.querySelector("input")).toBeNull();
   expect(document.body.textContent).not.toMatch(/OWN_PROPERTY|PLATFORM_AGGREGATE|QUERY_FAILED|NO_DATA|inventory_total|detail_ctr|demand_supply|return_sessions|publisher|CTR|benchmark|Report Builder|WhatsApp|7 días|30 días/);
   expect(screen.getByRole("link",{name:"Consultar propiedades"}).getAttribute("href")).toBe("/mis-propiedades");
  });
@@ -144,5 +144,38 @@ describe("Phase 1 inventory presentation",()=>{
  it("legacy source failure does not erase authorized BI",()=>{
   render(<Overview summary={null} inventoryOverview={<InventoryOverview view={buildInventoryDashboardView("platform",readings())}/>}/>);
   expect(screen.getByText(/No pudimos cargar los registros administrativos/)).toBeTruthy();expect(screen.getByText("75%")).toBeTruthy();
+ });
+});
+
+describe("Phase 2 filter contract and presentation",()=>{
+ it.each(["house","apartment","land","office","commercial"])("accepts certified type %s",property_type=>{
+  expect(parseInventoryDashboardFilters({property_type})).toEqual({property_type});
+ });
+ it.each(["sale","rent"])("accepts certified operation %s",operation=>{
+  expect(parseInventoryDashboardFilters({operation})).toEqual({operation});
+ });
+ it.each([{}, {property_type:"",operation:""}, {property_type:" \t ",operation:null}, {property_type:undefined}])("normalizes neutral input %j",input=>{
+  expect(parseInventoryDashboardFilters(input)).toEqual({});
+ });
+ it.each([{property_type:"villa"},{operation:"lease"},{operation:"SALE"},{property_type:" house "},{operation:["sale","sale"]},{operation:"x".repeat(1000)},{operation:"sale' OR 1=1"},{property_type:"<script>alert(1)</script>"},{scope:"PLATFORM_AGGREGATE"},{owner_id:"B"},{currency:"USD"},{property_status:"published"},{date:"today"},[],null])("refuses tampering %j",input=>{
+  expect(()=>parseInventoryDashboardFilters(input)).toThrow();
+ });
+ it.each(["own","platform"] as const)("unfiltered view remains Phase 1 equivalent for %s",audience=>{
+  expect(buildInventoryDashboardView(audience,readings(),{})).toEqual(buildInventoryDashboardView(audience,readings()));
+ });
+ it.each(["own","platform"] as const)("native labeled controls preserve URL cohort for %s",audience=>{
+  render(<InventoryOverview view={buildInventoryDashboardView(audience,readings(),{property_type:"office",operation:"rent"})}/>);
+  expect((screen.getByLabelText("Tipo de inmueble") as HTMLSelectElement).value).toBe("office");
+  expect((screen.getByLabelText("Operación") as HTMLSelectElement).value).toBe("rent");
+  const path=audience==="own"?"/cuenta":"/admin";
+  expect(screen.getByRole("form").getAttribute("action")).toBe(path);expect(screen.getByRole("form").getAttribute("method")).toBe("get");
+  expect(screen.getByRole("link",{name:"Limpiar filtros"}).getAttribute("href")).toBe(path);
+  expect(screen.getByRole("link",{name:"Volver a consultar"}).getAttribute("href")).toBe(path+"?property_type=office&operation=rent");
+  expect(screen.getByText(/Las proporciones corresponden a este inventario filtrado/)).toBeTruthy();
+ });
+ it.each(["own","platform"] as const)("filtered no-match is not an empty-account assertion for %s",audience=>{
+  render(<InventoryOverview view={buildInventoryDashboardView(audience,{publication_share:ratio("publication_share",0,0)},{property_type:"land",operation:"rent"})}/>);
+  expect(screen.getByText("No hay propiedades con estos filtros")).toBeTruthy();expect(screen.queryByText("Aún no tienes propiedades")).toBeNull();
+  expect(screen.queryByRole("link",{name:"Publicar una propiedad"})).toBeNull();expect(screen.queryByText("0%")).toBeNull();
  });
 });

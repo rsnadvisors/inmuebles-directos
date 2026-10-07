@@ -1,4 +1,26 @@
-import type { InventoryResponse, InventoryQueryResult } from "./inventory-query-contract";
+import { INVENTORY_VALUES, type InventoryFilters, type InventoryResponse, type InventoryQueryResult } from "./inventory-query-contract";
+
+export type InventoryAnalyticsFilters = Readonly<Pick<InventoryFilters, "property_type" | "operation">>;
+export class InventoryFilterError extends Error {
+ constructor() { super("Filtros no válidos. Elige un tipo de inmueble y una operación disponibles."); }
+}
+/** Closed URL boundary: neutral strings are absent; repeated/unknown inputs are refused. */
+export function parseInventoryDashboardFilters(input: unknown = {}): InventoryAnalyticsFilters {
+ if (!input || typeof input !== "object" || Array.isArray(input) || ![Object.prototype, null].includes(Object.getPrototypeOf(input))) throw new InventoryFilterError();
+ const raw = input as Record<string, unknown>;
+ if (Object.keys(raw).some(key => key !== "property_type" && key !== "operation")) throw new InventoryFilterError();
+ const filters: { property_type?: typeof INVENTORY_VALUES.property_type[number]; operation?: typeof INVENTORY_VALUES.operation[number] } = {};
+ for (const key of ["property_type", "operation"] as const) {
+  const value = raw[key];
+  if (value === undefined || value === null) continue;
+  if (typeof value !== "string" || value.length > 32) throw new InventoryFilterError();
+  if (!value.trim()) continue;
+  if (!(INVENTORY_VALUES[key] as readonly string[]).includes(value)) throw new InventoryFilterError();
+  if (key === "property_type") filters.property_type = value as typeof INVENTORY_VALUES.property_type[number];
+  else filters.operation = value as typeof INVENTORY_VALUES.operation[number];
+ }
+ return Object.freeze(filters);
+}
 
 export type DashboardAudience = "own" | "platform";
 export type DashboardMetric = "publication_share" | "inventory_total" | "type_mix" | "operation_mix" | "currency_mix" | "image_coverage";
@@ -7,14 +29,14 @@ export type WidgetId = "KPI_TOTAL" | "KPI_PUBLICATION_SHARE" | "IMAGE_COVERAGE" 
 export type WidgetState = "value" | "zero" | "no-data" | "error";
 export type DashboardRow = Readonly<{ key: string; label: string; count: number; text: string; href?: string }>;
 export type DashboardWidget = Readonly<{ id: WidgetId; title: string; state: WidgetState; valueText: string; help: string; ratioText?: string; percentage?: number; rows?: readonly DashboardRow[] }>;
-export type InventoryDashboardView = Readonly<{ audience: DashboardAudience; empty: boolean; title: string; queriedText: string | null; widgets: readonly DashboardWidget[] }>;
+export type InventoryDashboardView = Readonly<{ audience: DashboardAudience; empty: boolean; title: string; queriedText: string | null; widgets: readonly DashboardWidget[]; filters?: InventoryAnalyticsFilters }>;
 
 const integer = new Intl.NumberFormat("es-PE", { maximumFractionDigits: 0 });
 const percent = new Intl.NumberFormat("es-PE", { style: "percent", maximumFractionDigits: 1 });
 const date = new Intl.DateTimeFormat("es-PE", { dateStyle: "short", timeStyle: "short", timeZone: "America/Lima" });
 const statusLabels = { published: "Publicadas", draft: "Borradores", reserved: "Reservadas", sold: "Vendidas", rented: "Alquiladas", archived: "Archivadas" } as const;
-const typeLabels = { house: "Casas", apartment: "Departamentos", land: "Terrenos", office: "Oficinas", commercial: "Locales comerciales" } as const;
-const operationLabels = { sale: "Venta", rent: "Alquiler" } as const;
+export const typeLabels = { house: "Casas", apartment: "Departamentos", land: "Terrenos", office: "Oficinas", commercial: "Locales comerciales" } as const;
+export const operationLabels = { sale: "Venta", rent: "Alquiler" } as const;
 const currencyLabels = { PEN: "Soles (PEN)", USD: "Dólares (USD)" } as const;
 const errorText = "No pudimos cargar este indicador. Vuelve a consultar.";
 const noDataText = "Sin propiedades para calcular este porcentaje.";
@@ -49,7 +71,7 @@ function distribution(id: WidgetId, title: string, help: string, labels: Readonl
  }
  return { id, title, help, state: rows.every(row => row.count === 0) ? "zero" : "value", valueText: "", rows };
 }
-export function buildInventoryDashboardView(audience: DashboardAudience, responses: DashboardResponses): InventoryDashboardView {
+export function buildInventoryDashboardView(audience: DashboardAudience, responses: DashboardResponses, filters: InventoryAnalyticsFilters = {}): InventoryDashboardView {
  const own = audience === "own", share = result(responses.publication_share);
  const totalTitle = own ? "Tus propiedades actuales" : "Propiedades de la plataforma";
  const total: DashboardWidget = ratioShape(share)
@@ -77,5 +99,5 @@ export function buildInventoryDashboardView(audience: DashboardAudience, respons
   const first = date.format(new Date(Math.min(...from))), last = date.format(new Date(Math.max(...to)));
   queriedText = "Consulta realizada el " + first + (first === last ? "" : " – " + last);
  }
- return { audience, empty, title: own ? "Tus propiedades" : "Inventario de la plataforma", queriedText, widgets };
+ return { audience, empty, title: own ? "Tus propiedades" : "Inventario de la plataforma", queriedText, widgets, ...(Object.keys(filters).length ? { filters } : {}) };
 }
