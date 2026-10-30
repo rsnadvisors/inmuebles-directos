@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import Home from "../app/page";
 import PublishPage from "../app/publicar/page";
+import PublicationRecovery from "../app/publicar/PublicationRecovery";
 import RoutePage from "../app/[...slug]/page";
 
 vi.mock("../app/lib/auth-client", async () => {
@@ -18,6 +19,17 @@ vi.mock("../app/lib/auth-client", async () => {
 async function renderHome() {
   render(<Home />);
   await screen.findByRole("heading", { name: "Casa de prueba" });
+}
+
+function renderPublishPage() {
+  return render(
+    <PublicationRecovery
+      userId="11111111-1111-4111-8111-111111111111"
+      canPublish
+    >
+      <PublishPage />
+    </PublicationRecovery>
+  );
 }
 
 describe("baseline smoke tests (offline)", () => {
@@ -107,7 +119,7 @@ describe("baseline smoke tests (offline)", () => {
   });
 
   it("renders /publicar and its required fields without submitting", () => {
-    render(<PublishPage />);
+    renderPublishPage();
     expect(screen.getByRole("heading", { name: "Publica tu propiedad" })).toBeTruthy();
     const title = screen.getByLabelText("Título del anuncio") as HTMLInputElement;
     expect(title.checkValidity()).toBe(false);
@@ -117,7 +129,7 @@ describe("baseline smoke tests (offline)", () => {
   });
 
   it("accepts one valid synthetic photo locally without uploading", () => {
-    render(<PublishPage />);
+    renderPublishPage();
     fireEvent.change(screen.getByLabelText(/Fotos de la propiedad/), {
       target: { files: [new File(["synthetic"], "fixture.png", { type: "image/png" })] },
     });

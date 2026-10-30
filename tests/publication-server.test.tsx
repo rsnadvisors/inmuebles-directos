@@ -2,63 +2,68 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { POST } from "../app/api/publicar/route";
 import { MAX_PHOTO_BYTES, MAX_REQUEST_BYTES } from "../app/lib/publication";
-
-const mock = vi.hoisted(() => ({ create: vi.fn(), property: vi.fn(), image: vi.fn(), upload: vi.fn(), url: vi.fn(), delivery: vi.fn(), storageFrom: vi.fn(), finalize: vi.fn(), lookup: vi.fn(), remove: vi.fn(), cleanupImages: vi.fn(), cleanupProperty: vi.fn(), calls: [] as string[] }));
+const mock = vi.hoisted(() => ({ create: vi.fn(), prepare: vi.fn(), rpc: vi.fn(), upload: vi.fn(), delivery: vi.fn(),
+  storageFrom: vi.fn(), remove: vi.fn(), calls: [] as string[], plans: new Map<string, any>() }));
 vi.mock("../app/lib/property-images", () => ({
-  PRIVATE_PROPERTY_IMAGE_BUCKET: "property-images-private",
-  anonymousImageClient: () => ({}),
-  loadPublishedPrivateImage: mock.delivery,
+  PRIVATE_PROPERTY_IMAGE_BUCKET: "property-images-private", anonymousImageClient: () => ({}), loadPublishedPrivateImage: mock.delivery,
 }));
-vi.mock("../app/lib/auth-server", () => ({ getVerifiedUser: async () => {
-  if (!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) return { client: null, user: null };
-  return { client: mock.create(), user: { id: "fixture-user" } };
+vi.mock("../app/lib/auth-server", () => ({ getVerifiedPublicationUser: async () => {
+  if (!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) return { client: null, user: null, reason: "AUTH_REQUIRED" };
+  return { client: mock.create(), user: { id: "11111111-1111-4111-8111-111111111111",
+    is_anonymous: false, email: "publisher@example.invalid", email_confirmed_at: "2026-10-01T00:00:00Z" }, reason: null };
 } }));
 const secretError = { message: "PRIVATE SQL secret bucket internals", code: "INTERNAL" };
 function photo(type = "image/png", size = 4) { return new File([new Uint8Array(size)], "../../untrusted.exe", { type }); }
 function form() {
   const data = new FormData();
   Object.entries({ contact_phone: "900 000 001", title: " Casa ", description: " Descripción ", address: " Dirección ", city: "Piura", region: "Piura", operation: "Vender", type: "Casas", price: "100.50", currency: "USD", latitude: "-5.19", longitude: "-80.63", coordinatesConfirmed: "true" }).forEach(([k, v]) => data.set(k, v));
-  data.append("images", photo());
-  return data;
+  data.append("images", photo()); return data;
 }
 function request(data = form(), headers?: Record<string, string>) { return new Request("http://localhost:3103/api/publicar", { method: "POST", body: data, headers: { origin: "http://localhost:3103", ...headers } }); }
 async function reject(data: FormData) {
-  const response = await POST(request(data));
-  expect(response.status).toBe(400);
-  expect((await response.json()).code).toBe("VALIDATION_ERROR");
-  expect(mock.calls).toEqual([]);
+  const response = await POST(request(data)); expect(response.status).toBe(400);
+  expect((await response.json()).code).toBe("VALIDATION_ERROR"); expect(mock.calls).toEqual([]);
 }
 beforeEach(() => {
   vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "http://localhost:9999");
   vi.stubEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY", "synthetic-anon");
-  mock.calls.length = 0;
-  mock.property.mockReset().mockImplementation(() => { mock.calls.push("property"); return { select: () => ({ single: async () => ({ data: { id: "fixture-id" }, error: null }) }) }; });
-  mock.image.mockReset().mockImplementation(() => { mock.calls.push("image"); return { select: () => ({ single: async () => ({ data: { id: "11111111-1111-4111-8111-111111111111" }, error: null }) }) }; });
-  mock.upload.mockReset().mockImplementation(async () => { mock.calls.push("upload"); return { error: null }; });
-  mock.url.mockReset().mockReturnValue({ data: { publicUrl: "http://localhost/storage/v1/object/public/property-images/fixture.png" } });
+  vi.stubEnv("PUBLICATION_BOUNDARY_HMAC_KEY", "ab".repeat(32)); vi.stubEnv("PUBLICATION_BOUNDARY_HMAC_KEY_ID", "test");
+  mock.calls.length = 0; mock.plans.clear(); mock.prepare.mockReset();
   mock.delivery.mockReset().mockImplementation(async () => { mock.calls.push("delivery"); return new Blob(["image"], { type: "image/png" }); });
-  mock.storageFrom.mockReset().mockImplementation(() => ({ upload: mock.upload, getPublicUrl: mock.url, remove: mock.remove }));
-  mock.finalize.mockReset().mockImplementation(async () => { mock.calls.push("finalize"); return { data: mock.property.mock.calls[0][0].slug, error: null }; });
-  mock.lookup.mockReset().mockResolvedValue({ data: { status: "draft" }, error: null });
-  mock.remove.mockReset().mockImplementation(async () => { mock.calls.push("remove"); return { error: null }; });
-  mock.cleanupImages.mockReset().mockImplementation(async () => { mock.calls.push("cleanup-images"); return { error: null }; });
-  mock.cleanupProperty.mockReset().mockImplementation(async () => { mock.calls.push("cleanup-property"); return { error: null }; });
+  mock.remove.mockReset().mockResolvedValue({ error: null });
+  mock.upload.mockReset().mockImplementation(async (path: string) => {
+    mock.calls.push("upload");
+    for (const p of mock.plans.values()) for (const s of p.slots) if (s.path === path) s.observation = "PRESENT";
+    return { error: null };
+  });
+  mock.storageFrom.mockReset().mockReturnValue({ upload: mock.upload, remove: mock.remove });
+  mock.rpc.mockReset().mockImplementation(async (rpc: string, proof: { p_envelope: string }) => {
+    const e = JSON.parse(proof.p_envelope); mock.calls.push(e.purpose === "reconcile" ? e.action : e.purpose);
+    let p = mock.plans.get(e.request_id);
+    if (rpc === "prepare_publication_attempt") {
+      mock.prepare(e);
+      if (p && p.fingerprint !== e.fingerprint) return { error: { message: "PUBLICATION_REQUEST_MISMATCH", code: "23505" }, data: null };
+      if (!p) {
+        p = { requestId: e.request_id, fingerprint: e.fingerprint, state: "ACTIVE", revision: 0, parentValid: true,
+          slug: "casa-" + e.request_id, slots: e.manifest.map((m: any, i: number) => ({ ...m,
+            path: e.uid + "/" + e.request_id + "/" + m.imageId + "." + ({ "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp" } as any)[m.mime],
+            sortOrder: i, state: "RESERVED", metadataValid: true, observation: "ABSENT" })) };
+        mock.plans.set(e.request_id, p);
+      }
+    } else if (!p) return { data: null, error: { code: "P0002", message: "Publication not found" } };
+    if (rpc === "finalize_publication_attempt") { p.state = "FINALIZED"; p.revision++; p.slots.forEach((s: any) => s.state = "FINALIZED"); }
+    return { data: structuredClone(p), error: null };
+  });
   mock.create.mockReset().mockReturnValue({
-    from: (table: string) => ({
-      insert: table === "properties" ? mock.property : mock.image,
-      select: () => ({ eq: () => ({ eq: () => ({ maybeSingle: mock.lookup }), maybeSingle: mock.lookup }) }),
-      delete: () => ({ eq: table === "properties" ? mock.cleanupProperty : mock.cleanupImages }),
-    }),
-    storage: { from: mock.storageFrom },
-    rpc: mock.finalize,
+    from: () => { throw new Error("Direct application DML forbidden"); },
+    storage: { from: mock.storageFrom }, rpc: mock.rpc,
   });
 });
-
 describe("publication contact phone", () => {
   it("persists normalized listing phone in the draft insert without profile writes", async () => {
     const response = await POST(request(form()));
     expect(response.status).toBe(200);
-    expect(mock.property).toHaveBeenCalledWith(expect.objectContaining({ contact_phone: "+51900000001" }));
+    expect(mock.prepare.mock.calls[0][0].fields).toMatchObject({ contact_phone: "+51900000001" });
   });
   it.each(["", "123", "abc", "javascript:alert(1)", "+51900000001?text=bad", "+1234567890123456"])("rejects invalid phone before writes: %s", async value => {
     const data = form(); data.set("contact_phone", value);
@@ -66,6 +71,40 @@ describe("publication contact phone", () => {
   });
   it("rejects missing listing phone before writes", async () => {
     const data = form(); data.delete("contact_phone"); await reject(data);
+  });
+});
+
+describe("R01: conclusive rejection before preparation", () => {
+  const requestId = "22222222-2222-4222-8222-222222222222";
+  const subject = "11111111-1111-4111-8111-111111111111";
+  it.each(["validation", "content-type", "declared-size", "multipart"])("correlates %s rejection without RPC or upload", async kind => {
+    const data = form();
+    if (kind === "validation") data.set("title", "");
+    const req = kind === "content-type" || kind === "multipart"
+      ? new Request("http://localhost:3103/api/publicar", { method: "POST", body: "invalid", headers: {
+        origin: "http://localhost:3103", "x-publication-request-id": requestId,
+        "content-type": kind === "content-type" ? "application/json" : "multipart/form-data; boundary=missing" } })
+      : request(data, { "x-publication-request-id": requestId,
+        ...(kind === "declared-size" ? { "content-length": String(MAX_REQUEST_BYTES + 1) } : {}) });
+    const response = await POST(req);
+    expect(response.status).toBe(kind === "content-type" ? 415 : kind === "declared-size" ? 413 : 400);
+    expect(await response.json()).toMatchObject({ ok: false, preparation: "NOT_STARTED", requestId, subject });
+    expect(mock.rpc).not.toHaveBeenCalled(); expect(mock.upload).not.toHaveBeenCalled();
+  });
+  it.each([undefined, "invalid"])("does not attest an uncorrelated request ID %s", async supplied => {
+    const data = form(); data.set("title", "");
+    const response = await POST(request(data, supplied === undefined ? {} : { "x-publication-request-id": supplied }));
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body).not.toHaveProperty("preparation"); expect(body).not.toHaveProperty("subject");
+    expect(mock.rpc).not.toHaveBeenCalled();
+  });
+  it("R02: never attests rejection after entering preparation", async () => {
+    mock.rpc.mockResolvedValue({ data: null, error: secretError });
+    const response = await POST(request(form(), { "x-publication-request-id": requestId }));
+    expect(response.status).toBe(503);
+    expect(await response.json()).not.toHaveProperty("preparation");
+    expect(mock.rpc).toHaveBeenCalledOnce(); expect(mock.upload).not.toHaveBeenCalled();
   });
 });
 
@@ -127,164 +166,104 @@ describe("publication server: validation before any write", () => {
   });
 });
 
-describe("publication server: draft then controlled finalization", () => {
-  it.each([["Vender", "Casas", "sale", "house"], ["Alquilar", "Departamentos", "rent", "apartment"], ["Vender", "Terrenos", "sale", "land"]])("accepts %s %s", async (operation, type, listing, property) => {
-    const data = form(); data.set("operation", operation); data.set("type", type);
-    const response = await POST(request(data, { "sec-fetch-site": "same-origin" }));
-    expect(response.status).toBe(200); expect(await response.json()).toEqual({ ok: true, status: "published", slug: expect.stringMatching(/^casa-[0-9a-f-]{36}$/) });
-    expect(mock.property).toHaveBeenCalledWith(expect.objectContaining({ title: "Casa", description: "Descripción", address: "Dirección", price: 100.5, listing_type: listing, property_type: property, currency: "USD", city: "Piura", region: "Piura", owner_id: "fixture-user", status: "draft", published_at: null, lat: -5.19, lng: -80.63 }));
-    expect(mock.property.mock.calls[0][0].slug).toMatch(/^casa-[0-9a-f-]{36}$/);
-    expect(mock.calls).toEqual(["property", "upload", "image", "finalize", "delivery"]);
-    expect(mock.storageFrom).toHaveBeenCalledWith("property-images-private");
-    expect(mock.url).not.toHaveBeenCalled();
-    expect(mock.image.mock.calls[0][0]).toMatchObject({ storage_bucket: "property-images-private", public_url: null });
-    expect(mock.finalize).toHaveBeenCalledWith("finalize_private_property_publication", { p_property_id: "fixture-id" });
-  });
-  it("accepts five max-size photos and uses canonical names, ordering and cover", async () => {
-    const data = form(); data.delete("images");
-    for (const type of ["image/jpeg", "image/png", "image/webp", "image/png", "image/png"]) data.append("images", photo(type, MAX_PHOTO_BYTES));
-    expect((await POST(request(data))).status).toBe(200);
-    expect(mock.calls).toEqual(["property", ...Array.from({ length: 5 }, () => ["upload", "image"]).flat(), "finalize", "delivery"]);
-    const paths = mock.upload.mock.calls.map(call => call[0]);
-    expect(new Set(paths).size).toBe(5);
-    for (const [i, extension] of ["jpg", "png", "webp", "png", "png"].entries()) {
-      expect(paths[i]).toMatch(new RegExp(`^fixture-user/fixture-id/[0-9a-f-]{36}\\.${extension}$`));
-      expect(paths[i]).not.toContain("untrusted");
-      expect(mock.image.mock.calls[i][0]).toMatchObject({ sort_order: i, is_cover: i === 0 });
-      expect(mock.upload.mock.calls[i][2].upsert).toBe(false);
-    }
-  });
-  it("reports missing configuration before any write", async () => {
-    vi.stubEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY", "");
-    const response = await POST(request()); expect(response.status).toBe(401);
-    expect((await response.json()).code).toBe("AUTH_REQUIRED");
-  });
-  it("normalizes client initialization exceptions", async () => {
-    mock.create.mockImplementation(() => { throw secretError; });
-    const response = await POST(request()); expect(response.status).toBe(503);
-    expect(await response.text()).not.toContain("PRIVATE"); expect(mock.calls).toEqual([]);
-  });
-});
 
-describe("publication server: failures never finalize a partial draft", () => {
-  async function failed(code: string, data = form()) {
-    const response = await POST(request(data)); expect(response.status).toBe(502);
-    const body = await response.json();
-    expect(body).toMatchObject({ ok: false, code });
-    expect(body.message).not.toContain("PRIVATE");
-    expect(mock.finalize).toHaveBeenCalledTimes(code === "FINALIZATION_FAILED" ? 1 : 0);
-  }
-  it("treats an INSERT error response as an uncertain non-public draft", async () => {
-    mock.property.mockReturnValue({ select: () => ({ single: async () => ({ data: null, error: secretError }) }) });
-    await failed("DRAFT_CREATE_UNCERTAIN"); expect(mock.upload).not.toHaveBeenCalled();
+describe("publication server: durable plan and retry", () => {
+  it.each([["Vender", "Casas", "sale", "house"], ["Alquilar", "Departamentos", "rent", "apartment"], ["Vender", "Terrenos", "sale", "land"], ["Alquilar", "Oficinas", "rent", "office"], ["Vender", "Locales comerciales", "sale", "commercial"]])("accepts %s %s through signed preparation", async (operation, type, listing, property) => {
+    const data = form(); data.set("operation", operation); data.set("type", type);
+    const response = await POST(request(data)); expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ok: true, status: "published", slug: expect.stringMatching(/^casa-[0-9a-f-]{36}$/) });
+    expect(mock.prepare.mock.calls[0][0].fields).toMatchObject({ listing_type: listing, property_type: property, price: 100.5, currency: "USD" });
+    expect(mock.calls).toEqual(["prepare", "upload", "inspect", "finalize", "delivery"]);
+    expect(mock.upload.mock.calls[0][2].upsert).toBe(false); expect(mock.remove).not.toHaveBeenCalled();
   });
-  it("A: first upload fails after property", async () => {
-    mock.upload.mockImplementation(async () => { mock.calls.push("upload"); return { error: secretError }; }); await failed("UPLOAD_FAILED");
-    expect(mock.upload).toHaveBeenCalledTimes(1); expect(mock.image).not.toHaveBeenCalled();
-    expect(mock.calls).toEqual(["property", "upload", "remove", "cleanup-images", "cleanup-property"]);
+  it("creates exactly five stable paths before upload and never uses original filenames", async () => {
+    const data = form(); data.delete("images");
+    for (const mime of ["image/jpeg", "image/png", "image/webp", "image/png", "image/png"]) data.append("images", photo(mime, MAX_PHOTO_BYTES));
+    expect((await POST(request(data))).status).toBe(200);
+    expect(mock.prepare.mock.calls[0][0].manifest).toHaveLength(5);
+    const paths = mock.upload.mock.calls.map(c => c[0]); expect(new Set(paths).size).toBe(5);
+    expect(paths.every(p => !p.includes("untrusted"))).toBe(true);
   });
-  it("B: second upload fails after first image was recorded", async () => {
-    mock.upload.mockImplementationOnce(async () => { mock.calls.push("upload"); return { error: null }; })
-      .mockImplementationOnce(async () => { mock.calls.push("upload"); return { error: secretError }; });
-    const data = form(); data.append("images", photo()); await failed("UPLOAD_FAILED", data);
-    expect(mock.upload).toHaveBeenCalledTimes(2); expect(mock.image).toHaveBeenCalledTimes(1);
-    expect(mock.remove.mock.calls[0][0]).toHaveLength(2);
+  it("requires a private key before preparation or upload", async () => {
+    vi.stubEnv("PUBLICATION_BOUNDARY_HMAC_KEY", "");
+    const response = await POST(request()); expect(response.status).toBe(503);
+    expect((await response.json()).code).toBe("PUBLICATION_BOUNDARY_UNAVAILABLE"); expect(mock.calls).toEqual([]);
   });
-  it("C: image row fails after upload", async () => {
-    mock.image.mockImplementation(() => { mock.calls.push("image"); return { select: () => ({ single: async () => ({ data: null, error: secretError }) }) }; }); await failed("METADATA_FAILED");
-    expect(mock.upload).toHaveBeenCalledTimes(1); expect(mock.image).toHaveBeenCalledTimes(1);
+  it("normalizes client initialization exceptions without exposing internals", async () => {
+    mock.create.mockImplementation(() => { throw secretError; });
+    const response = await POST(request()); expect(response.status).toBe(503); expect(await response.text()).not.toContain("PRIVATE");
   });
-  it("D: unexpected exception after first upload", async () => {
-    mock.image.mockImplementation(() => { throw secretError; }); await failed("METADATA_FAILED");
-    expect(mock.upload).toHaveBeenCalledTimes(1); expect(mock.image).toHaveBeenCalledOnce();
+  it("reports missing authentication without writes", async () => {
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY", ""); expect((await POST(request())).status).toBe(401); expect(mock.calls).toEqual([]);
   });
-  it("E: finalization fails while the property remains a draft", async () => {
-    mock.finalize.mockImplementation(async () => { mock.calls.push("finalize"); return { data: null, error: secretError }; });
-    await failed("FINALIZATION_FAILED");
-    expect(mock.lookup).toHaveBeenCalledOnce();
-    expect(mock.calls).toEqual(["property", "upload", "image", "finalize", "remove", "cleanup-images", "cleanup-property"]);
+  it("retries failed upload using identical slots/path and never cleans up or creates metadata", async () => {
+    const id = "22222222-2222-4222-8222-222222222222";
+    mock.upload.mockResolvedValueOnce({ error: secretError });
+    expect((await POST(request(form(), { "x-publication-request-id": id }))).status).toBe(502);
+    const path = mock.upload.mock.calls[0][0];
+    expect((await POST(request(form(), { "x-publication-request-id": id }))).status).toBe(200);
+    expect(mock.upload.mock.calls[1][0]).toBe(path);
+    expect(mock.plans.size).toBe(1); expect(mock.plans.get(id).slots).toHaveLength(1); expect(mock.remove).not.toHaveBeenCalled();
   });
-  it("F: a lost finalization response resolves to success if published", async () => {
-    mock.finalize.mockResolvedValue({ data: null, error: secretError });
-    mock.lookup.mockResolvedValue({ data: { status: "published", slug: "confirmed-slug" }, error: null });
-    const response = await POST(request());
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ ok: true, status: "published", slug: "confirmed-slug" });
-    expect(mock.remove).not.toHaveBeenCalled();
+  it("reads back a committed upload when the response was lost instead of uploading twice", async () => {
+    const original = mock.upload.getMockImplementation()!;
+    mock.upload.mockImplementationOnce(async (...args) => { await original(...args); return { error: secretError }; });
+    expect((await POST(request())).status).toBe(200); expect(mock.upload).toHaveBeenCalledOnce();
   });
-  it("F: committed publication with failed image delivery reports published without cleanup or retry", async () => {
-    mock.delivery.mockImplementation(async () => { mock.calls.push("delivery"); throw secretError; });
-    const response = await POST(request());
-    expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ ok: true, status: "published", imageDelivery: "unconfirmed" });
-    expect(mock.remove).not.toHaveBeenCalled();
-    expect(mock.cleanupImages).not.toHaveBeenCalled();
-    expect(mock.cleanupProperty).not.toHaveBeenCalled();
-    expect(mock.property).toHaveBeenCalledOnce();
+  it("keeps the same plan on an unknown inspection and performs no cleanup", async () => {
+    const original = mock.rpc.getMockImplementation()!;
+    mock.rpc.mockImplementation(async (name, proof) => name === "reconcile_publication_attempt"
+      ? { data: null, error: secretError } : original(name, proof));
+    expect((await POST(request())).status).toBe(503);
+    expect(mock.calls).not.toContain("finalize"); expect(mock.remove).not.toHaveBeenCalled(); expect(mock.plans.size).toBe(1);
   });
-  it("reuses a published result for the same request ID without a second insert, upload or finalization", async () => {
-    const id = "11111111-1111-4111-8111-111111111111";
-    mock.lookup.mockResolvedValue({ data: { id: "fixture-id", status: "published", slug: `casa-${id}` }, error: null });
-    const response = await POST(request(form(), { "x-publication-request-id": id }));
-    expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ ok: true, status: "published", slug: `casa-${id}` });
-    expect(mock.property).not.toHaveBeenCalled();
-    expect(mock.upload).not.toHaveBeenCalled();
-    expect(mock.image).not.toHaveBeenCalled();
-    expect(mock.finalize).not.toHaveBeenCalled();
+  it("refuses malformed reconciliation observations rather than treating them as absence", async () => {
+    const original = mock.rpc.getMockImplementation()!;
+    mock.rpc.mockImplementation(async (name, proof) => {
+      const r = await original(name, proof);
+      if (name === "reconcile_publication_attempt") r.data.slots[0].observation = "UNKNOWN";
+      return r;
+    });
+    expect((await POST(request())).status).toBe(503); expect(mock.calls).not.toContain("finalize");
   });
-  it("publishes once and makes a subsequent identical POST idempotent", async () => {
-    const id = "11111111-1111-4111-8111-111111111111";
-    mock.lookup.mockResolvedValueOnce({ data: null, error: null });
-    const first = await POST(request(form(), { "x-publication-request-id": id }));
-    expect(first.status).toBe(200);
-    expect((await first.json()).slug).toBe(`casa-${id}`);
-    expect(mock.property).toHaveBeenCalledWith(expect.objectContaining({ id }));
-    mock.lookup.mockResolvedValueOnce({ data: { id: "fixture-id", status: "published", slug: `casa-${id}` }, error: null });
-    const changed = form(); changed.set("title", "Otro título");
-    const second = await POST(request(changed, { "x-publication-request-id": id }));
-    expect(second.status).toBe(200);
-    expect((await second.json()).slug).toBe(`casa-${id}`);
-    expect(mock.property).toHaveBeenCalledOnce();
-    expect(mock.image).toHaveBeenCalledOnce();
+  it("does not recreate metadata deleted from an existing plan", async () => {
+    const original = mock.rpc.getMockImplementation()!;
+    mock.rpc.mockImplementation(async (name, proof) => {
+      const r = await original(name, proof); r.data.slots[0].metadataValid = false; return r;
+    });
+    expect((await POST(request())).status).toBe(503); expect(mock.upload).not.toHaveBeenCalled();
+  });
+  it("resolves lost finalize acknowledgement as published without deleting anything", async () => {
+    const original = mock.rpc.getMockImplementation()!;
+    mock.rpc.mockImplementation(async (name, proof) => {
+      const r = await original(name, proof); return name === "finalize_publication_attempt" ? { error: secretError, data: null } : r;
+    });
+    expect((await POST(request())).status).toBe(200); expect(mock.remove).not.toHaveBeenCalled();
+  });
+  it("reports delivery failure honestly after publication without cleanup", async () => {
+    mock.delivery.mockRejectedValue(secretError);
+    const response = await POST(request()); expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ status: "published", imageDelivery: "unconfirmed" }); expect(mock.remove).not.toHaveBeenCalled();
+  });
+  it("replays exactly published without another upload or finalize", async () => {
+    const id = "22222222-2222-4222-8222-222222222222";
+    expect((await POST(request(form(), { "x-publication-request-id": id }))).status).toBe(200);
+    expect((await POST(request(form(), { "x-publication-request-id": id }))).status).toBe(200);
+    expect(mock.upload).toHaveBeenCalledOnce(); expect(mock.calls.filter(c => c === "finalize")).toHaveLength(1);
+  });
+  it("rejects changed content for the same published request", async () => {
+    const id = "22222222-2222-4222-8222-222222222222";
+    await POST(request(form(), { "x-publication-request-id": id }));
+    const changed = form(); changed.set("title", "Changed");
+    expect((await POST(request(changed, { "x-publication-request-id": id }))).status).toBe(409);
     expect(mock.upload).toHaveBeenCalledOnce();
-    expect(mock.finalize).toHaveBeenCalledOnce();
   });
-  it("does not duplicate a draft when the same request ID is in progress", async () => {
-    const response = await POST(request(form(), { "x-publication-request-id": "11111111-1111-4111-8111-111111111111" }));
-    expect(response.status).toBe(409);
-    expect((await response.json()).code).toBe("PUBLICATION_IN_PROGRESS");
-    expect(mock.property).not.toHaveBeenCalled();
+  it.each(["CANCELLED", "CANCEL_PENDING"])("never uploads from terminal/frozen state %s", async state => {
+    const original = mock.rpc.getMockImplementation()!;
+    mock.rpc.mockImplementation(async (name, proof) => { const r = await original(name, proof); r.data.state = state; return r; });
+    expect((await POST(request())).status).toBe(409); expect(mock.upload).not.toHaveBeenCalled();
   });
-  it.each(["draft", "published"])("reconciles a racing insert conflict against the same %s property", async status => {
-    const id = "11111111-1111-4111-8111-111111111111";
-    mock.lookup.mockResolvedValueOnce({ data: null, error: null })
-      .mockResolvedValueOnce({ data: { id, status, slug: `casa-${id}` }, error: null });
-    mock.property.mockReturnValue({ select: () => ({ single: async () => ({ data: null, error: { code: "23505" } }) }) });
-    const response = await POST(request(form(), { "x-publication-request-id": id }));
-    expect(response.status).toBe(status === "published" ? 200 : 409);
-    expect(await response.json()).toMatchObject(status === "published"
-      ? { ok: true, status: "published", slug: `casa-${id}`, imageDelivery: "not_checked" }
-      : { ok: false, code: "PUBLICATION_IN_PROGRESS" });
-    expect(mock.property).toHaveBeenCalledOnce();
-    expect(mock.upload).not.toHaveBeenCalled(); expect(mock.image).not.toHaveBeenCalled();
-    expect(mock.finalize).not.toHaveBeenCalled(); expect(mock.remove).not.toHaveBeenCalled();
-    expect(mock.cleanupProperty).not.toHaveBeenCalled();
-  });
-  it("a lost insert acknowledgment keeps the existing draft and the retry performs no new write", async () => {
-    const id = "11111111-1111-4111-8111-111111111111";
-    mock.lookup.mockResolvedValueOnce({ data: null, error: null })
-      .mockResolvedValue({ data: { id, status: "draft", slug: `casa-${id}` }, error: null });
-    mock.property.mockReturnValue({ select: () => ({ single: async () => { throw new Error("Lost insert reply"); } }) });
-    expect((await POST(request(form(), { "x-publication-request-id": id }))).status).toBe(409);
-    expect((await POST(request(form(), { "x-publication-request-id": id }))).status).toBe(409);
-    expect(mock.property).toHaveBeenCalledOnce(); expect(mock.upload).not.toHaveBeenCalled();
-    expect(mock.image).not.toHaveBeenCalled(); expect(mock.finalize).not.toHaveBeenCalled();
-    expect(mock.remove).not.toHaveBeenCalled(); expect(mock.cleanupProperty).not.toHaveBeenCalled();
-  });
-  it("rejects malformed request IDs before a write", async () => {
-    const response = await POST(request(form(), { "x-publication-request-id": "not-a-uuid" }));
-    expect(response.status).toBe(400);
-    expect(mock.calls).toEqual([]);
+  it("rejects malformed request IDs before preparation", async () => {
+    expect((await POST(request(form(), { "x-publication-request-id": "invalid" }))).status).toBe(400); expect(mock.calls).toEqual([]);
   });
 });
