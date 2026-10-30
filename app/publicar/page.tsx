@@ -2,23 +2,30 @@
 
 import Link from "next/link";
 import { FormEvent, useRef, useState } from "react";
-import { MAX_PRICE, PARTIAL_MESSAGE, validatePhotos, validatePublication, validCoordinates } from "../lib/publication";
+import { MAX_PRICE, validatePhotos, validatePublication, validCoordinates } from "../lib/publication";
 import SiteHeader from "../components/SiteHeader";
 import { publicationFingerprint } from "../lib/publication-attempt";
+import { PublicationRecoveryPanel, usePublicationRecovery } from "./PublicationRecovery";
 
 const initialCoordinates = { latitude: "", longitude: "" };
 export default function PublishPage() {
+  const recovery = usePublicationRecovery();
   const [status, setStatus] = useState("");
-  const [uncertain, setUncertain] = useState(false);
   const [coords, setCoords] = useState(initialCoordinates);
   const [coordinatesConfirmed, setCoordinatesConfirmed] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
   const [propertyType, setPropertyType] = useState("Casas");
   const [publishedSlug, setPublishedSlug] = useState<string | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const submitting = useRef(false);
-  const submissionAttempt = useRef<{ id: string; fingerprint: string } | null>(null);
+  const isSubmitting = recovery.busy;
   const locationVersion = useRef(0);
+  const formRef = useRef<HTMLFormElement>(null);
+
+  function resetPublicationForm() {
+    locationVersion.current++;
+    formRef.current?.reset();
+    setFiles([]); setCoords(initialCoordinates); setCoordinatesConfirmed(false);
+    setPropertyType("Casas"); setPublishedSlug(null); setStatus("");
+  }
 
   function editCoordinate(key: keyof typeof coords, value: string) {
     locationVersion.current++;
@@ -56,71 +63,41 @@ export default function PublishPage() {
       setStatus((error as Error).message);
     }
   }
-  async function resolveAttempt(action: "cancel" | "reconcile") {
-    if (submitting.current || !submissionAttempt.current) return;
-    submitting.current = true; setIsSubmitting(true);
-    try {
-      const response = await fetch("/api/publicar/cancelar", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ requestId: submissionAttempt.current.id, action }) });
-      const result = await response.json();
-      if (response.ok && result.ok === true && result.state === "CANCELLED" && result.requestId === submissionAttempt.current.id) {
-        submissionAttempt.current = null;
-        try { window.sessionStorage.removeItem("publicationAttempt"); } catch { /* in-memory state already cleared */ }
-        setUncertain(false); setStatus("Intento cancelado y cierre confirmado. Puedes iniciar una nueva publicación cuando lo decidas.");
-      } else {
-        setUncertain(true);
-        setStatus(result.code === "PUBLICATION_ALREADY_FINALIZED"
-          ? "La propiedad ya está publicada. Revísala en Mis propiedades; no vuelvas a publicarla."
-          : "El intento sigue pendiente. Conserva los mismos datos para reintentar o vuelve a comprobar su cancelación.");
-      }
-    } catch { setUncertain(true); setStatus("No pudimos confirmar el cierre. No inicies otro intento todavía."); }
-    finally { submitting.current = false; setIsSubmitting(false); }
-  }
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (submitting.current) return;
+    const operation = recovery.beginPublication();
+    if (!operation) return;
     const form = event.currentTarget;
-    const payload = new FormData(form);
-    payload.set("latitude", coords.latitude);
-    payload.set("longitude", coords.longitude);
-    payload.set("coordinatesConfirmed", String(coordinatesConfirmed));
-    files.forEach(file => payload.append("images", file));
-    let input: ReturnType<typeof validatePublication>;
-    try { input = validatePublication(payload); }
-    catch (error) { setStatus((error as Error).message); return; }
-    submitting.current = true;
-    locationVersion.current++;
-    setIsSubmitting(true);
-    setUncertain(false);
-    setPublishedSlug(null);
-    setStatus("Publicando…");
     try {
+      const payload = new FormData(form);
+      payload.set("latitude", coords.latitude);
+      payload.set("longitude", coords.longitude);
+      payload.set("coordinatesConfirmed", String(coordinatesConfirmed));
+      files.forEach(file => payload.append("images", file));
+      let input: ReturnType<typeof validatePublication>;
+      try { input = validatePublication(payload); }
+      catch (error) { setStatus((error as Error).message); return; }
+      locationVersion.current++;
+      setPublishedSlug(null);
+      setStatus("Publicando…");
       const fingerprint = await publicationFingerprint(input);
-      let attempt = submissionAttempt.current;
-      if (!attempt) {
-        try {
-          const stored = JSON.parse(window.sessionStorage.getItem("publicationAttempt") ?? "null");
-          if (stored && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(stored.id) && /^[0-9a-f]{64}$/.test(stored.fingerprint)) attempt = stored;
-        } catch { /* unavailable or invalid tab storage */ }
-      }
-      submissionAttempt.current = attempt;
-      if (attempt && attempt.fingerprint !== fingerprint) {
-        setUncertain(true);
-        setStatus("Hay una publicación anterior pendiente de confirmar. Revisa Mis propiedades antes de iniciar otra con estos datos.");
-        return;
-      }
-      attempt ??= { id: crypto.randomUUID(), fingerprint };
-      submissionAttempt.current = attempt;
-      try { window.sessionStorage.setItem("publicationAttempt", JSON.stringify(attempt)); } catch { /* ref preserves current attempt */ }
+      const attempt = recovery.bindPublication(operation, fingerprint);
+      if (!attempt) { if (recovery.isCurrent(operation)) setStatus(""); return; }
+      if (!recovery.markPublicationSent(operation)) return;
       const response = await fetch("/api/publicar", { method: "POST", body: payload,
         headers: { "X-Publication-Request-Id": attempt.id } });
       const result = await response.json();
+      if (!recovery.isCurrent(operation)) return;
+      if (recovery.releaseRejectedPublication(operation, response.status, result)) {
+        setStatus(typeof result.message === "string" ? result.message : "La solicitud fue rechazada antes de preparar la publicación.");
+        return;
+      }
       if (response.status === 401) {
+        recovery.publicationUncertain(operation);
         window.location.assign("/login?returnTo=/publicar");
         setStatus("La sesión expiró. Inicia sesión para continuar.");
       } else if (response.ok && result.ok === true && result.status === "published") {
-        submissionAttempt.current = null;
-        try { window.sessionStorage.removeItem("publicationAttempt"); } catch { /* no persisted value */ }
+        if (!recovery.completePublication(operation)) return;
         form.reset();
         setFiles([]);
         setCoords(initialCoordinates);
@@ -131,24 +108,23 @@ export default function PublishPage() {
           ? "Propiedad publicada. No pudimos confirmar la imagen; revísala en Mis propiedades. No vuelvas a publicarla."
           : "Propiedad publicada. Puedes verla en Mis propiedades.");
       } else if (result.ok === false && ["VALIDATION_ERROR", "INVALID_REQUEST", "INVALID_CONTENT_TYPE", "INVALID_ORIGIN", "REQUEST_TOO_LARGE", "PUBLICATION_FAILED"].includes(result.code)) {
+        recovery.publicationUncertain(operation);
         setStatus(typeof result.message === "string" ? result.message : "No se pudo completar la publicación.");
       } else {
-        setUncertain(true);
-        setStatus(PARTIAL_MESSAGE);
+        recovery.publicationUncertain(operation); setStatus("");
       }
     } catch {
-      setUncertain(true);
-      setStatus(PARTIAL_MESSAGE);
+      if (recovery.isCurrent(operation)) { recovery.publicationUncertain(operation); setStatus(""); }
     } finally {
-      submitting.current = false;
-      setIsSubmitting(false);
+      recovery.finishPublication(operation);
     }
   }
   return <><SiteHeader /><main className="publish-page">
     <Link href="/" className="back-link">← Volver al mapa</Link>
     <p className="eyebrow">PUBLICA GRATIS · PERÚ</p><h1>Publica tu propiedad</h1>
     <p className="publish-intro">Completa los datos, indica la ubicación y añade fotos para mostrar tu inmueble en el mapa.</p>
-    <form onSubmit={submit} className="publish-form" aria-busy={isSubmitting}>
+    <PublicationRecoveryPanel onStartNewPublication={resetPublicationForm} />
+    <form ref={formRef} onSubmit={submit} className="publish-form" aria-busy={isSubmitting}>
       <label>Tipo de propiedad<select name="type" value={propertyType} onChange={event => setPropertyType(event.target.value)} required disabled={isSubmitting}><option value="Casas">Casa</option><option value="Departamentos">Departamento</option><option value="Terrenos">Terreno</option><option value="Oficinas">Oficina</option><option value="Locales comerciales">Local comercial</option></select></label>
       <label>Operación<select name="operation" required disabled={isSubmitting}><option value="Vender">Vender</option><option value="Alquilar">Alquilar</option></select></label>
       <label>Título del anuncio<input name="title" required maxLength={120} disabled={isSubmitting} placeholder="Ej. Terreno residencial en Castilla" /></label>
@@ -168,12 +144,8 @@ export default function PublishPage() {
         <small>{coordinatesConfirmed ? "Coordenadas confirmadas." : "Coordenadas sin confirmar. Obtén tu ubicación o confirma manualmente la ubicación en Perú."}</small>
       </fieldset>
       <label>Fotos de la propiedad<input type="file" accept="image/jpeg,image/png,image/webp" multiple required disabled={isSubmitting} onChange={onFiles} /><small>Obligatorio: 1 a 5 fotos · JPG, PNG o WebP · máximo 5 MiB por foto.</small>{files.length > 0 && <small>{files.length} foto(s) seleccionada(s).</small>}</label>
-      <button className="publish-submit" type="submit" disabled={isSubmitting}>{isSubmitting ? "Publicando…" : "Publicar propiedad"}</button>
-      {status && <p className="form-status" role={uncertain ? "alert" : "status"}>{status}</p>}
-      {uncertain && <div className="publish-success-links"><Link href="/mis-propiedades">Revisar Mis propiedades</Link>
-        <button type="button" disabled={isSubmitting} onClick={() => resolveAttempt("cancel")}>Cancelar el intento pendiente</button>
-        <button type="button" disabled={isSubmitting} onClick={() => resolveAttempt("reconcile")}>Comprobar el intento pendiente</button>
-      </div>}
+      <button className="publish-submit" type="submit" disabled={!recovery.canSubmit}>{isSubmitting ? "Publicando…" : "Publicar propiedad"}</button>
+      {status && <p className="form-status" role="status">{status}</p>}
       {status.startsWith("Propiedad publicada") && <div className="publish-success-links">{publishedSlug && <Link href={`/inmueble/${encodeURIComponent(publishedSlug)}`}>Ver ficha completa</Link>}<Link href="/mis-propiedades">Ver Mis propiedades</Link></div>}
     </form>
   </main></>;

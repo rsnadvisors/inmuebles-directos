@@ -7,9 +7,10 @@ const mock = vi.hoisted(() => ({ create: vi.fn(), prepare: vi.fn(), rpc: vi.fn()
 vi.mock("../app/lib/property-images", () => ({
   PRIVATE_PROPERTY_IMAGE_BUCKET: "property-images-private", anonymousImageClient: () => ({}), loadPublishedPrivateImage: mock.delivery,
 }));
-vi.mock("../app/lib/auth-server", () => ({ getVerifiedUser: async () => {
-  if (!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) return { client: null, user: null };
-  return { client: mock.create(), user: { id: "11111111-1111-4111-8111-111111111111" } };
+vi.mock("../app/lib/auth-server", () => ({ getVerifiedPublicationUser: async () => {
+  if (!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) return { client: null, user: null, reason: "AUTH_REQUIRED" };
+  return { client: mock.create(), user: { id: "11111111-1111-4111-8111-111111111111",
+    is_anonymous: false, email: "publisher@example.invalid", email_confirmed_at: "2026-10-01T00:00:00Z" }, reason: null };
 } }));
 const secretError = { message: "PRIVATE SQL secret bucket internals", code: "INTERNAL" };
 function photo(type = "image/png", size = 4) { return new File([new Uint8Array(size)], "../../untrusted.exe", { type }); }
@@ -70,6 +71,40 @@ describe("publication contact phone", () => {
   });
   it("rejects missing listing phone before writes", async () => {
     const data = form(); data.delete("contact_phone"); await reject(data);
+  });
+});
+
+describe("R01: conclusive rejection before preparation", () => {
+  const requestId = "22222222-2222-4222-8222-222222222222";
+  const subject = "11111111-1111-4111-8111-111111111111";
+  it.each(["validation", "content-type", "declared-size", "multipart"])("correlates %s rejection without RPC or upload", async kind => {
+    const data = form();
+    if (kind === "validation") data.set("title", "");
+    const req = kind === "content-type" || kind === "multipart"
+      ? new Request("http://localhost:3103/api/publicar", { method: "POST", body: "invalid", headers: {
+        origin: "http://localhost:3103", "x-publication-request-id": requestId,
+        "content-type": kind === "content-type" ? "application/json" : "multipart/form-data; boundary=missing" } })
+      : request(data, { "x-publication-request-id": requestId,
+        ...(kind === "declared-size" ? { "content-length": String(MAX_REQUEST_BYTES + 1) } : {}) });
+    const response = await POST(req);
+    expect(response.status).toBe(kind === "content-type" ? 415 : kind === "declared-size" ? 413 : 400);
+    expect(await response.json()).toMatchObject({ ok: false, preparation: "NOT_STARTED", requestId, subject });
+    expect(mock.rpc).not.toHaveBeenCalled(); expect(mock.upload).not.toHaveBeenCalled();
+  });
+  it.each([undefined, "invalid"])("does not attest an uncorrelated request ID %s", async supplied => {
+    const data = form(); data.set("title", "");
+    const response = await POST(request(data, supplied === undefined ? {} : { "x-publication-request-id": supplied }));
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body).not.toHaveProperty("preparation"); expect(body).not.toHaveProperty("subject");
+    expect(mock.rpc).not.toHaveBeenCalled();
+  });
+  it("R02: never attests rejection after entering preparation", async () => {
+    mock.rpc.mockResolvedValue({ data: null, error: secretError });
+    const response = await POST(request(form(), { "x-publication-request-id": requestId }));
+    expect(response.status).toBe(503);
+    expect(await response.json()).not.toHaveProperty("preparation");
+    expect(mock.rpc).toHaveBeenCalledOnce(); expect(mock.upload).not.toHaveBeenCalled();
   });
 });
 

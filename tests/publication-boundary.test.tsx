@@ -8,6 +8,7 @@ import { validatePublication } from "../app/lib/publication";
 const auth = vi.hoisted(() => ({ client: null as any, user: null as any }));
 vi.mock("../app/lib/auth-server", () => ({ getVerifiedUser: async () => auth }));
 const uid="11111111-1111-4111-8111-111111111111", requestId="22222222-2222-4222-8222-222222222222";
+const registeredUser = { id: uid, is_anonymous: false, email: "owner@example.invalid", email_confirmed_at: "2026-10-01T00:00:00Z" };
 const imageId="33333333-3333-4333-8333-333333333333";
 const fingerprint="cd".repeat(32), path=`${uid}/${requestId}/${imageId}.png`;
 function plan(state="ACTIVE", observation="ABSENT") {
@@ -91,7 +92,49 @@ describe("cancellation route admission", () => {
   it("requires same-origin",async()=>expect((await POST(req({requestId,action:"cancel"},"https://other.invalid"))).status).toBe(403));
   it("requires a verified user",async()=>expect((await POST(req({requestId,action:"cancel"}))).status).toBe(401));
   it.each([{requestId,action:"release"},{requestId,action:"cancel",path},{requestId:"bad",action:"cancel"}])("strictly rejects client mutation instructions %j",async body=>{
-    auth.client={};auth.user={id:uid};expect((await POST(req(body))).status).toBe(400);
+    auth.client={};auth.user={...registeredUser};expect((await POST(req(body))).status).toBe(400);
   });
-  it("counts body bytes before JSON parsing",async()=>{auth.client={};auth.user={id:uid};expect((await POST(req({requestId,action:"cancel",junk:"x".repeat(1024)}))).status).toBe(413);});
+  it("counts body bytes before JSON parsing",async()=>{auth.client={};auth.user={...registeredUser};expect((await POST(req({requestId,action:"cancel",junk:"x".repeat(1024)}))).status).toBe(413);});
+  it.each(["cancel", "reconcile"])("preserves %s of an existing own attempt without newly requiring email confirmation", async action => {
+    const rpc = vi.fn(async (_name: string, proof: { p_envelope: string }) => {
+      const envelope = JSON.parse(proof.p_envelope);
+      expect(envelope.uid).toBe(uid);
+      expect(envelope.request_id).toBe(requestId);
+      return { data: plan(envelope.action === "inspect" ? "ACTIVE" : envelope.action === "begin_cancel" ? "CANCEL_PENDING" : "CANCELLED"), error: null };
+    });
+    const remove = vi.fn().mockResolvedValue({ error: null });
+    auth.client = { rpc, storage: { from: () => ({ remove }) } };
+    auth.user = { ...registeredUser, email_confirmed_at: undefined };
+    const response = await POST(req({ requestId, action }));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ok: true, requestId, state: action === "cancel" ? "CANCELLED" : "ACTIVE" });
+    expect(rpc.mock.calls.map(call => JSON.parse(call[1].p_envelope).action)).toEqual(
+      action === "cancel" ? ["inspect", "begin_cancel", "close_cancel"] : ["inspect"]);
+    if (action === "cancel") expect(remove).toHaveBeenCalledWith([path]);
+    else expect(remove).not.toHaveBeenCalled();
+  });
+  it("denies a foreign attempt reported missing in the caller's owner context without Storage access", async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: null, error: { code: "PT404", message: "not found" } });
+    const storageFrom = vi.fn();
+    auth.client = { rpc, storage: { from: storageFrom } };
+    auth.user = { ...registeredUser };
+    const response = await POST(req({ requestId, action: "cancel" }));
+    expect(response.status).toBe(404);
+    const body = await response.json();
+    expect(body).toMatchObject({ ok: false, code: "PUBLICATION_NOT_FOUND" });
+    expect(body).not.toHaveProperty("preparation"); expect(body).not.toHaveProperty("subject");
+    expect(JSON.parse(rpc.mock.calls[0][1].p_envelope).uid).toBe(uid);
+    expect(rpc).toHaveBeenCalledOnce();
+    expect(storageFrom).not.toHaveBeenCalled();
+  });
+  it("rejects a cross-owner returned path before cancellation or Storage access", async () => {
+    const foreign = plan(); foreign.slots[0].path = "other/" + path;
+    const rpc = vi.fn().mockResolvedValue({ data: foreign, error: null });
+    const storageFrom = vi.fn();
+    auth.client = { rpc, storage: { from: storageFrom } };
+    auth.user = { ...registeredUser };
+    expect((await POST(req({ requestId, action: "cancel" }))).status).toBe(503);
+    expect(rpc).toHaveBeenCalledOnce();
+    expect(storageFrom).not.toHaveBeenCalled();
+  });
 });

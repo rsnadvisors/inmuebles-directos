@@ -1,7 +1,7 @@
 import { MAX_REQUEST_BYTES, PublicationValidationError, validatePublication } from "../../lib/publication";
 import { preparePublication, inspectPublication, finalizePublication, PublicationBoundaryError,
   PUBLICATION_REQUEST_ID, type PublicationPlan } from "../../lib/publication-boundary-server";
-import { getVerifiedUser } from "../../lib/auth-server";
+import { getVerifiedPublicationUser } from "../../lib/auth-server";
 import { PRIVATE_PROPERTY_IMAGE_BUCKET, anonymousImageClient, loadPublishedPrivateImage } from "../../lib/property-images";
 
 export const runtime = "nodejs";
@@ -40,22 +40,29 @@ export async function POST(request: Request): Promise<Response> {
   const origin = request.headers.get("origin");
   const expectedOrigin = process.env.NODE_ENV === "production" ? "https://inmueblesdirectos.com" : new URL(request.url).origin;
   if (origin !== expectedOrigin || request.headers.get("sec-fetch-site") === "cross-site") return failure("INVALID_ORIGIN", "La solicitud debe iniciarse desde este sitio.", 403);
-  let auth: Awaited<ReturnType<typeof getVerifiedUser>>;
-  try { auth = await getVerifiedUser(); }
+  let auth: Awaited<ReturnType<typeof getVerifiedPublicationUser>>;
+  try { auth = await getVerifiedPublicationUser(); }
   catch { return failure("PUBLICATION_FAILED", "El servicio de publicación no está disponible.", 503); }
+  if (auth.reason === "PUBLICATION_IDENTITY_REQUIRED") return failure("PUBLICATION_IDENTITY_REQUIRED", "Para publicar necesitas una cuenta registrada con correo electrónico confirmado.", 403);
   const { client: supabase, user } = auth;
   if (!supabase || !user) return failure("AUTH_REQUIRED", "Inicia sesión para publicar una propiedad.", 401);
-  if (!/^multipart\/form-data\s*;/i.test(request.headers.get("content-type") ?? "")) return failure("INVALID_CONTENT_TYPE", "El formato de la solicitud no es válido.", 415);
+  const suppliedId = request.headers.get("x-publication-request-id");
+  // This describes this request only; it does not prove an older attempt is absent.
+  const rejectBeforePreparation = (code: string, message: string, status: number) => Response.json({
+    ok: false, code, message,
+    ...(suppliedId !== null && PUBLICATION_REQUEST_ID.test(suppliedId)
+      ? { preparation: "NOT_STARTED", requestId: suppliedId, subject: user.id } : {}),
+  }, { status });
+  if (!/^multipart\/form-data\s*;/i.test(request.headers.get("content-type") ?? "")) return rejectBeforePreparation("INVALID_CONTENT_TYPE", "El formato de la solicitud no es válido.", 415);
   const length = request.headers.get("content-length");
-  if (length && /^\d+$/.test(length) && Number(length) > MAX_REQUEST_BYTES) return failure("REQUEST_TOO_LARGE", "La solicitud supera el tamaño permitido.", 413);
+  if (length && /^\d+$/.test(length) && Number(length) > MAX_REQUEST_BYTES) return rejectBeforePreparation("REQUEST_TOO_LARGE", "La solicitud supera el tamaño permitido.", 413);
   let input: ReturnType<typeof validatePublication>;
   try { input = validatePublication(await readForm(request)); }
   catch (error) {
-    if (error instanceof BodyTooLarge) return failure("REQUEST_TOO_LARGE", "La solicitud supera el tamaño permitido.", 413);
-    if (error instanceof PublicationValidationError) return failure("VALIDATION_ERROR", error.message, 400);
-    return failure("INVALID_REQUEST", "No se pudo leer el formulario.", 400);
+    if (error instanceof BodyTooLarge) return rejectBeforePreparation("REQUEST_TOO_LARGE", "La solicitud supera el tamaño permitido.", 413);
+    if (error instanceof PublicationValidationError) return rejectBeforePreparation("VALIDATION_ERROR", error.message, 400);
+    return rejectBeforePreparation("INVALID_REQUEST", "No se pudo leer el formulario.", 400);
   }
-  const suppliedId = request.headers.get("x-publication-request-id");
   if (suppliedId !== null && !PUBLICATION_REQUEST_ID.test(suppliedId)) {
     return failure("INVALID_REQUEST", "El identificador de publicación no es válido.", 400);
   }
