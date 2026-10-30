@@ -11,7 +11,8 @@ import publication_boundary_lab as lab
 
 ROOT=pathlib.Path(__file__).resolve().parents[2]
 WORK=pathlib.Path(os.environ['PUBLICATION_TEST_EVIDENCE_DIR']).resolve()
-assert WORK.parent==pathlib.Path('/root') and WORK.name.startswith('inmuebles-publication-boundary-')
+lab.assert_ci_context()
+lab.assert_work(WORK)
 KEY=os.environ['PUBLICATION_TEST_HMAC_KEY']; assert len(KEY)==64
 lab.SECRETS.append(KEY)
 ROWS=[]
@@ -25,6 +26,7 @@ def admin(s): return lab.sql(s).strip()
 def enc(b): return base64.urlsafe_b64encode(b).rstrip(b'=').decode()
 ST=lab.config(lab.STORAGE); RT=lab.config(lab.REST)
 for c,port,internal in [(ST,lab.STORAGE_PORT,5000),(RT,lab.REST_PORT,3000)]:
+    assert c['Config']['Labels'].get('inmuebles.publication-lab')==lab.RUN
     assert c['NetworkSettings']['Ports'][str(internal)+'/tcp']==[{'HostIp':'127.0.0.1','HostPort':str(port)}]
     for e in c['Config']['Env']: assert '.supabase.co' not in e.lower()
 env=dict(e.split('=',1) for e in ST['Config']['Env'] if '=' in e)
@@ -58,7 +60,7 @@ def rpc(name,p,uid=A):
     return status,data
 def expect_rpc(name,p,uid=A):
     status,data=rpc(name,p,uid)
-    if status!=200: raise AssertionError(name+' failed HTTP '+str(status)+' '+str(data)[:450])
+    if status!=200: raise AssertionError(name+' failed HTTP '+str(status))
     return data
 def fields():
     return {'title':'Synthetic QA Perú','description':'Synthetic test only','address':'Synthetic address','district':None,
@@ -92,11 +94,99 @@ def finalize(plan,uid=A):
 def deny_http(name,status): record(name,400<=status<500,http=status)
 def sql_client(s,uid=A):
     guard="DO $$ BEGIN IF current_database()<>'"+lab.DB+"' THEN RAISE EXCEPTION 'Target mismatch'; END IF; END $$;"
-    p=subprocess.run(['docker','exec','-i',lab.CONTAINER,'psql','-X','-U','postgres','-d',lab.DB,'-Atq','-v','ON_ERROR_STOP=1'],input=guard+"begin; set local role authenticated; set local request.jwt.claim.sub='"+uid+"'; "+s+'; rollback;',text=True,capture_output=True)
+    lab.sql('select 1;')  # Also verify the synthetic database ownership marker.
+    p=subprocess.run(['docker','exec','-i',lab.CONTAINER,'psql','-X','-U','postgres','-d',lab.DB,'-Atq','-v','ON_ERROR_STOP=1'],input=guard+"begin; set local role authenticated; set local request.jwt.claim.sub='"+uid+"'; "+s+'; rollback;',text=True,capture_output=True,env=lab.PROCESS_ENV,timeout=30)
     return p.returncode,p.stdout.strip()
+
+def server_code(phase):
+    """Execute the actual TS boundary and SDK; only URL routing is adapted.
+
+    No Next server, browser, Auth mock or RPC/Storage response mock is involved.
+    The server-only marker is stubbed solely for this server-side Node process.
+    """
+    script=r'''
+const fs = require('node:fs');
+const path = require('node:path');
+const assert = require('node:assert/strict');
+const { createRequire } = require('node:module');
+const data = JSON.parse(fs.readFileSync(0, 'utf8'));
+const rootRequire = createRequire(path.join(data.root, 'package.json'));
+const ts = rootRequire('typescript');
+const out = path.join(data.work, 'server-code-' + data.phase);
+fs.mkdirSync(out, { recursive: false });
+fs.mkdirSync(path.join(out, 'node_modules/server-only'), { recursive: true });
+fs.writeFileSync(path.join(out, 'node_modules/server-only/index.js'), '', { flag: 'wx' });
+for (const name of ['publication-boundary-server', 'publication', 'contact-phone', 'property-images', 'property-image-source']) {
+  const source = fs.readFileSync(path.join(data.root, 'app/lib', name + '.ts'), 'utf8');
+  const result = ts.transpileModule(source, { compilerOptions: {
+    target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS,
+    sourceMap: false, declaration: false, incremental: false
+  }});
+  fs.writeFileSync(path.join(out, name + '.js'), result.outputText, { flag: 'wx' });
+}
+const sdk = rootRequire('@supabase/supabase-js');
+const boundary = require(path.join(out, 'publication-boundary-server.js'));
+function client(jwt) {
+  return sdk.createClient('http://127.0.0.1:' + data.rest, data.anon, {
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+    global: { headers: { Authorization: 'Bearer ' + jwt }, fetch: async (input, init) => {
+      const url = new URL(input.toString());
+      assert.equal(url.hostname, '127.0.0.1');
+      assert.equal(url.port, String(data.rest));
+      assert.equal(url.protocol, 'http:');
+      assert.equal(url.username + url.password, '');
+      if (url.pathname.startsWith('/rest/v1/')) url.pathname = url.pathname.slice('/rest/v1'.length);
+      else if (url.pathname.startsWith('/storage/v1/')) {
+        url.pathname = url.pathname.slice('/storage/v1'.length); url.port = String(data.storage);
+      } else throw new Error('Non-laboratory SDK route refused');
+      return fetch(url, { ...init, redirect: 'error' });
+    }}
+  });
+}
+(async () => {
+  const a = client(data.ownerToken), b = client(data.otherToken);
+  const file = new File([Buffer.from(data.png, 'base64')], 'synthetic.png', { type: 'image/png' });
+  const input = { ...data.fields, files: [file] };
+  const id = require('node:crypto').randomUUID();
+  const plan = await boundary.preparePublication(a, data.owner, id, input);
+  const replay = await boundary.preparePublication(a, data.owner, id, input);
+  assert.deepEqual(replay.slots, plan.slots);
+  await assert.rejects(() => boundary.inspectPublication(b, data.other, id), e => e.code === 'PUBLICATION_NOT_FOUND');
+  const upload = await a.storage.from('property-images-private').upload(plan.slots[0].path, file, { upsert: false });
+  assert.equal(upload.error, null);
+  const observed = await boundary.inspectPublication(a, data.owner, id);
+  assert.equal(observed.slots[0].observation, 'PRESENT');
+  const done = await boundary.finalizePublication(a, data.owner, observed);
+  assert.equal(done.state, 'FINALIZED');
+  assert.equal((await boundary.inspectPublication(a, data.owner, id)).state, 'FINALIZED');
+  await assert.rejects(() => boundary.cancelPublication(a, data.owner, id, 'cancel'), e => e.code === 'PUBLICATION_ALREADY_FINALIZED');
+  const next = require('node:crypto').randomUUID();
+  const pending = await boundary.preparePublication(b, data.other, next, input);
+  assert.equal((await b.storage.from('property-images-private').upload(pending.slots[0].path, file, { upsert: false })).error, null);
+  assert.equal((await boundary.cancelPublication(b, data.other, next, 'reconcile')).state, 'ACTIVE');
+  const cancelled = await boundary.cancelPublication(b, data.other, next, 'cancel');
+  assert.equal(cancelled.state, 'CANCELLED');
+  assert.equal(cancelled.slots[0].state, 'RETIRED');
+  assert.equal(cancelled.slots[0].observation, 'ABSENT');
+  await assert.rejects(() => boundary.preparePublication(b, data.other, next, input), e => e.code === 'PUBLICATION_CANCELLED');
+  process.stdout.write(JSON.stringify({ publication: true, recovery: true, cancellation: true, identity: true, idempotency: true }));
+})().catch(() => { process.stderr.write('Actual server boundary integration failed'); process.exitCode = 1; });
+'''
+    payload={'root':str(ROOT),'work':str(WORK),'phase':phase,'rest':lab.REST_PORT,'storage':lab.STORAGE_PORT,
+        'anon':ANON,'owner':A,'other':B,'ownerToken':token(A),'otherToken':token(B),
+        'fields':fields(),'png':base64.b64encode(PNG).decode()}
+    node_env={**lab.PROCESS_ENV,'NODE_PATH':str(ROOT/'node_modules'),
+        'PUBLICATION_BOUNDARY_HMAC_KEY':KEY,'PUBLICATION_BOUNDARY_HMAC_KEY_ID':'synthetic-lab'}
+    p=subprocess.run(['node','-e',script],input=json.dumps(payload),env=node_env,text=True,capture_output=True,timeout=120)
+    record('actual server module plus '+phase,p.returncode==0)
+    observed=json.loads(p.stdout)
+    for check in ('publication','recovery','cancellation','identity','idempotency'):
+        record('actual server '+phase+' '+check,observed.get(check) is True)
 
 def main():
     record('fresh synthetic database',admin('select current_database();')==lab.DB and admin('select count(*) from auth.users;')=='0')
+    record('new Expand applied once before Contract',admin("select count(*) filter (where version='20261004012121'),"
+        "count(*) filter (where version='20261004012123') from supabase_migrations.schema_migrations;")=='1|0')
     for uid,label in [(A,'a'),(B,'b'),(G,'agent')]:
         admin("insert into auth.users(id,email,raw_user_meta_data) values ('"+uid+"','"+label+"@publication.example.invalid','{}');")
     admin("update public.profiles set role='agent' where id='"+G+"';")
@@ -110,9 +200,26 @@ def main():
     # New foundation also works before Contract, alongside the compatibility path.
     p,_=prepare(B); status,_=upload(p,uid=B); assert status==200
     status,published=finalize(inspect(p,B),B); record('new publisher plus Expand',status==200 and published['state']=='FINALIZED')
-    contract=next((ROOT/'supabase/migrations').glob('*_publication_boundary_contract.sql')); admin(contract.read_text())
+    server_code('Expand')
+    # New Contract must reject even a zero-image legacy draft, atomically.
+    legacy=str(uuid.uuid4())
+    status,_=http('POST','properties',A,json.dumps({**f,'id':legacy,'slug':'legacy-blocks-'+legacy}).encode())
+    record('unresolved legacy draft exists before new Contract',status==201)
+    before=lab.catalog_snapshot()
+    output=lab.apply_contract(succeeds=False)
+    record('new Contract rejects unresolved legacy draft',
+        'Legacy drafts require explicit reconciliation before Contract' in output)
+    record('rejected new Contract leaves catalogs ACL synthetic rows and history unchanged',lab.catalog_snapshot()==before)
+    # Delete only this test's own, image-free fixture through the owner's REST API.
+    status,_=http('DELETE','properties?id=eq.'+legacy,A)
+    record('explicit synthetic legacy reconciliation',status in (200,204) and
+        admin("select count(*) from public.properties where id='"+legacy+"';")=='0')
+    lab.apply_contract()
     time.sleep(.5)
     record('Contract applied only in synthetic DB',admin("select count(*) from pg_policies where policyname='publication exact private slot admission';")=='1')
+    record('new Contract migration recorded exactly once',admin(
+        "select count(*) from supabase_migrations.schema_migrations where version='20261004012123';")=='1')
+    server_code('Contract')
     for uid,label in [(A,'owner'),(G,'agent')]:
         direct={**f,'id':str(uuid.uuid4()),'slug':'blocked-'+str(uuid.uuid4()),'owner_id':uid}
         status,_=http('POST','properties',uid,json.dumps(direct).encode()); deny_http(label+' direct draft INSERT denied',status)
@@ -210,7 +317,8 @@ def main():
         rc,_=sql_client('select * from '+target); record('direct private read denied '+target,rc!=0)
     record('new helpers have empty search_path',admin("select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='private' and p.proname like 'publication_%' and not coalesce(p.proconfig @> array['search_path=\"\"'],false);")=='0')
     record('no anonymous function grants',admin("select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where p.proname like '%publication%' and n.nspname in ('private','public') and has_function_privilege('anon',p.oid,'EXECUTE');")=='0')
-    print('Real isolated publication REST/Storage:',len(ROWS),'PASS; 0 FAIL')
+    counts={result:sum(r['result']==result for r in ROWS) for result in ('PASS','FAIL','NOT REPRODUCIBLE')}
+    print('Real isolated publication REST/Storage:',json.dumps(counts,sort_keys=True))
 
 def race_test():
     content=PNG+b'\0'*(1024*1024-len(PNG)); plan,_=prepare(A,content=content)
@@ -242,4 +350,8 @@ def race_test():
         status,_=remove(closed,B); remaining=inspect(closed); record('foreign orphan deletion does not remove bytes',remaining['slots'][0]['observation']=='PRESENT')
         status,_=remove(closed); record('own exact tombstone cleanup without parent',status==200 and inspect(closed)['slots'][0]['observation']=='ABSENT')
 
-if __name__=='__main__': main()
+if __name__=='__main__':
+    try: main()
+    except Exception as error:
+        print(lab.redact(str(error)),file=sys.stderr)
+        sys.exit(1)

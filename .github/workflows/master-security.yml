@@ -13,6 +13,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version-file: .node-version
@@ -22,7 +24,7 @@ jobs:
         run: echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
       - name: Start synthetic local Supabase only
         run: |
-          docker network create e0-local-network
+          docker network create --opt com.docker.network.bridge.host_binding_ipv4=127.0.0.1 --label "inmuebles.synthetic-run=${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}" e0-local-network
           mkdir -p "$RUNNER_TEMP/inmuebles-lab/supabase"
           cp supabase/config.toml "$RUNNER_TEMP/inmuebles-lab/supabase/config.toml"
           npx supabase start --network-id e0-local-network --workdir "$RUNNER_TEMP/inmuebles-lab"
@@ -42,3 +44,9 @@ jobs:
         run: COMPAT_ONLY=contract-precondition python3 tests/security/private_draft_compatibility.py
       - name: Selective Expand and Contract migration rehearsal
         run: COMPAT_ONLY=selective-migrations python3 tests/security/private_draft_compatibility.py
+      - name: Publication boundary Expand and Contract regression
+        env:
+          PUBLICATION_LAB_CI: "1"
+          PUBLICATION_LAB_RUN: ${{ github.run_id }}_${{ github.run_attempt }}
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python3 -B tests/security/publication_boundary_lab.py "$RUNNER_TEMP/inmuebles-publication-boundary-$PUBLICATION_LAB_RUN"
