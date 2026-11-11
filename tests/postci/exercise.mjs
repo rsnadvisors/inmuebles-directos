@@ -13,7 +13,7 @@ const require = createRequire(import.meta.url);
 const { chromium } = require(path.join(work, "browser/node_modules/playwright"));
 const sharp = require(path.join(candidate, "node_modules/sharp"));
 const api = "http://127.0.0.1:54321";
-const app = "http://127.0.0.1:3101";
+const app = "http://localhost:3101";
 const mail = "http://127.0.0.1:54324";
 const anonymous = process.env.LAB_ANON;
 const service = process.env.LAB_SERVICE;
@@ -32,7 +32,7 @@ async function eventually(action, ms = 60000) {
 
 async function start(dir) {
   const log = openSync(path.join(work, path.basename(dir) + "-next.log"), "a");
-  const child = spawn(process.execPath, ["node_modules/next/dist/bin/next", "dev", "-H", "127.0.0.1", "-p", "3101"], {
+  const child = spawn(process.execPath, ["node_modules/next/dist/bin/next", "dev", "-H", "localhost", "-p", "3101"], {
     cwd: dir, detached: true, stdio: ["ignore", log, log],
     env: { PATH: process.env.PATH, HOME: process.env.HOME, CI: "true", NEXT_TELEMETRY_DISABLED: "1",
       NEXT_PUBLIC_SUPABASE_URL: api, NEXT_PUBLIC_SUPABASE_ANON_KEY: anonymous,
@@ -118,6 +118,25 @@ async function recovery(browser) {
     assert(link, "Expected local recovery link");
     stage = "G3 same-browser PKCE callback";
     const callback = page.waitForRequest(r => r.url().startsWith(app + "/auth/callback?") && new URL(r.url()).searchParams.has("code"));
+    const sent = link.searchParams.get("redirect_to");
+    if (sent) {
+      const target = new URL(sent);
+      console.log("G3_MAIL_REDIRECT=" + target.origin + target.pathname + " returnTo=" + target.searchParams.has("returnTo"));
+    }
+    page.on("response", response => {
+      const url = new URL(response.url());
+      if (url.origin === api && url.pathname === "/auth/v1/verify") {
+        const location = response.headers().location;
+        if (location) {
+          const next = new URL(location, api);
+          console.log("G3_VERIFY_HTTP=" + response.status() + " location=" + next.origin + next.pathname +
+            " code=" + next.searchParams.has("code") + " error=" + next.searchParams.has("error"));
+        }
+      }
+      if (url.origin === app && url.pathname === "/auth/callback") {
+        console.log("G3_CALLBACK_HTTP=" + response.status() + " code=" + url.searchParams.has("code"));
+      }
+    });
     await page.goto(link.href);
     await callback;
     await page.waitForURL(app + "/restablecer-password");
@@ -168,19 +187,24 @@ function record(slug) {
     "from public.properties p where p.slug='" + slug + "';");
 }
 
-async function publish(ctx, title, image, useRequestId) {
-  const headers = { origin: app, "sec-fetch-site": "same-origin" };
-  if (useRequestId) headers["x-publication-request-id"] = randomUUID();
-  const response = await ctx.request.post(app + "/api/publicar", { headers, multipart: {
-    title, description: "Fixture de publicación aislada", address: "Dirección sintética", city: "Piura", region: "Piura",
-    type: "Casas", operation: "Vender", price: "72000", currency: "PEN", latitude: "-5.19449",
-    longitude: "-80.63282", coordinatesConfirmed: "true", contact_phone: "900000000",
-    images: { name: "synthetic.png", mimeType: "image/png", buffer: image },
-  } });
-  const result = await response.json();
-  if (!response.ok() || !result.ok || !result.slug) {
+async function publish(page, title, image, useRequestId) {
+  const requestId = useRequestId ? randomUUID() : null;
+  const response = await page.evaluate(async ({ title, bytes, requestId }) => {
+    const form = new FormData();
+    for (const [key, value] of Object.entries({
+      title, description: "Fixture de publicación aislada", address: "Dirección sintética", city: "Piura", region: "Piura",
+      type: "Casas", operation: "Vender", price: "72000", currency: "PEN", latitude: "-5.19449",
+      longitude: "-80.63282", coordinatesConfirmed: "true", contact_phone: "900000000",
+    })) form.set(key, value);
+    form.set("images", new File([new Uint8Array(bytes)], "synthetic.png", { type: "image/png" }));
+    const headers = requestId ? { "x-publication-request-id": requestId } : {};
+    const r = await fetch("/api/publicar", { method: "POST", headers, body: form });
+    return { status: r.status, ok: r.ok, result: await r.json() };
+  }, { title, bytes: Array.from(image), requestId });
+  const { result } = response;
+  if (!response.ok || !result.ok || !result.slug) {
     const code = /^[A-Z_]{2,60}$/.test(result.code) ? result.code : "UNKNOWN";
-    console.log("SYNTHETIC_PUBLICATION_HTTP=" + response.status() + " CODE=" + code);
+    console.log("SYNTHETIC_PUBLICATION_HTTP=" + response.status + " CODE=" + code);
     throw new Error("publication failed");
   }
   return result.slug;
@@ -207,8 +231,9 @@ async function rollbackTest(browser, firstProcess) {
     const page = await ctx.newPage();
     stage = "G4 candidate sign-in and publish";
     await login(page, user);
+    await page.goto(app + "/publicar");
     const image = await sharp({ create: { width: 32, height: 32, channels: 3, background: "#18713b" } }).png().toBuffer();
-    const slug = await publish(ctx, "SEC01 candidato " + randomBytes(4).toString("hex"), image, true);
+    const slug = await publish(page, "SEC01 candidato " + randomBytes(4).toString("hex"), image, true);
     const original = record(slug);
     assert.equal(original.property.status, "published");
     assert.equal(original.images.length, 1);
@@ -224,7 +249,7 @@ async function rollbackTest(browser, firstProcess) {
     await page.getByRole("heading", { name: original.property.title, exact: true }).waitFor();
     assert.deepEqual(await imageBytes(ctx, original.images[0].id), originalBytes);
     stage = "G4 publish through legacy finalizer";
-    const newSlug = await publish(ctx, "SEC01 reversión " + randomBytes(4).toString("hex"), image, false);
+    const newSlug = await publish(page, "SEC01 reversión " + randomBytes(4).toString("hex"), image, false);
     const latest = record(newSlug);
     assert.equal(latest.property.status, "published");
     assert.equal(latest.images.length, 1);

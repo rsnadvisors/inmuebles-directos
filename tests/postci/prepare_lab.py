@@ -9,9 +9,9 @@ candidate = Path(os.environ["RUNNER_TEMP"]) / "candidate"
 target = Path(os.environ["LAB_DIR"]) / "supabase"
 config = (candidate / "supabase/config.toml").read_text()
 config = re.sub(r'(?m)^project_id = .+$', 'project_id = "sec01-postci-ci"', config)
-config = re.sub(r'(?m)^site_url = .+$', 'site_url = "http://127.0.0.1:3101"', config)
+config = re.sub(r'(?m)^site_url = .+$', 'site_url = "http://localhost:3101"', config)
 config = re.sub(r'(?m)^additional_redirect_urls = .+$',
-                'additional_redirect_urls = ["http://127.0.0.1:3101/auth/callback**"]', config)
+                'additional_redirect_urls = ["http://localhost:3101/**"]', config)
 config = re.sub(r"(?ms)(^\[db\.seed\]\n.*?)^enabled = true$", r"\g<1>enabled = false", config, count=1)
 parsed = tomllib.loads(config)
 assert parsed["db"]["seed"]["enabled"] is False
