@@ -1,3 +1,4 @@
+import { siteOrigin } from "../../lib/auth-origin";
 import { imageExtensions, MAX_REQUEST_BYTES, PublicationValidationError, validatePublication } from "../../lib/publication";
 import { getVerifiedUser } from "../../lib/auth-server";
 import { PRIVATE_PROPERTY_IMAGE_BUCKET, anonymousImageClient, loadPublishedPrivateImage } from "../../lib/property-images";
@@ -37,7 +38,7 @@ async function readForm(request: Request): Promise<FormData> {
 
 export async function POST(request: Request): Promise<Response> {
   const origin = request.headers.get("origin");
-  const expectedOrigin = process.env.NODE_ENV === "production" ? "https://inmueblesdirectos.com" : new URL(request.url).origin;
+  const expectedOrigin = process.env.NODE_ENV === "production" ? siteOrigin() : new URL(request.url).origin;
   if (origin !== expectedOrigin || request.headers.get("sec-fetch-site") === "cross-site") return failure("INVALID_ORIGIN", "La solicitud debe iniciarse desde este sitio.", 403);
   let auth: Awaited<ReturnType<typeof getVerifiedUser>>;
   try { auth = await getVerifiedUser(); }
