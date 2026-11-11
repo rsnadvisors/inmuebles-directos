@@ -23,3 +23,17 @@ export async function getVerifiedUser() {
   const { data, error } = await client.auth.getUser();
   return { client, user: error ? null : data.user };
 }
+
+// Publication requires a provider-verified registered identity with confirmed email.
+// Keep generic authentication separate so existing owner recovery remains available.
+export async function getVerifiedPublicationUser() {
+  const { client, user } = await getVerifiedUser();
+  if (!client || !user) return { client: null, user: null, reason: "AUTH_REQUIRED" } as const;
+  if (typeof user.id !== "string" || !user.id.trim() || user.is_anonymous !== false
+    || typeof user.email !== "string" || !user.email.trim()
+    || typeof user.email_confirmed_at !== "string" || !user.email_confirmed_at.trim()
+    || !Number.isFinite(Date.parse(user.email_confirmed_at))) {
+    return { client: null, user: null, reason: "PUBLICATION_IDENTITY_REQUIRED" } as const;
+  }
+  return { client, user, reason: null } as const;
+}
