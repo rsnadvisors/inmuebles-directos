@@ -19,7 +19,7 @@ VOLUME="inmuebles_publication_boundary_bytes_"+RUN
 REST_PORT=int(os.environ.get('PUBLICATION_TEST_REST_PORT','0'))
 STORAGE_PORT=int(os.environ.get('PUBLICATION_TEST_STORAGE_PORT','0'))
 WORK=pathlib.Path(os.environ['RUNNER_TEMP']).resolve()/('inmuebles-publication-boundary-'+RUN)
-CONTRACT=ROOT/'supabase/migrations/20261004012123_publication_boundary_contract.sql'
+CONTRACT=ROOT/'supabase/proposed/20261004012123_publication_boundary_contract.sql'
 SECRETS=[]
 PROCESS_ENV={k:os.environ[k] for k in ('PATH','HOME','LANG','RUNNER_TEMP','GITHUB_ACTIONS',
     'GITHUB_RUN_ID','GITHUB_RUN_ATTEMPT','PUBLICATION_LAB_CI','PUBLICATION_LAB_RUN') if k in os.environ}

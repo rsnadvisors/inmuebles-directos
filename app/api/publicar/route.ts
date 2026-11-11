@@ -1,4 +1,5 @@
 import { MAX_REQUEST_BYTES, PublicationValidationError, validatePublication } from "../../lib/publication";
+import { siteOrigin } from "../../lib/auth-origin";
 import { preparePublication, inspectPublication, finalizePublication, PublicationBoundaryError,
   PUBLICATION_REQUEST_ID, type PublicationPlan } from "../../lib/publication-boundary-server";
 import { getVerifiedPublicationUser } from "../../lib/auth-server";
@@ -38,7 +39,7 @@ async function readForm(request: Request): Promise<FormData> {
 
 export async function POST(request: Request): Promise<Response> {
   const origin = request.headers.get("origin");
-  const expectedOrigin = process.env.NODE_ENV === "production" ? "https://inmueblesdirectos.com" : new URL(request.url).origin;
+  const expectedOrigin = process.env.NODE_ENV === "production" ? siteOrigin() : new URL(request.url).origin;
   if (origin !== expectedOrigin || request.headers.get("sec-fetch-site") === "cross-site") return failure("INVALID_ORIGIN", "La solicitud debe iniciarse desde este sitio.", 403);
   let auth: Awaited<ReturnType<typeof getVerifiedPublicationUser>>;
   try { auth = await getVerifiedPublicationUser(); }

@@ -1,11 +1,12 @@
 import { getVerifiedUser } from "../../../lib/auth-server";
+import { siteOrigin } from "../../../lib/auth-origin";
 import { cancelPublication, PUBLICATION_REQUEST_ID, PublicationBoundaryError } from "../../../lib/publication-boundary-server";
 
 export const runtime = "nodejs";
 const failure = (code: string, status: number) => Response.json({ ok: false, code,
   message: "No pudimos confirmar el cierre del intento. Conserva su identificador y vuelve a comprobarlo." }, { status });
 export async function POST(request: Request): Promise<Response> {
-  const origin = process.env.NODE_ENV === "production" ? "https://inmueblesdirectos.com" : new URL(request.url).origin;
+  const origin = process.env.NODE_ENV === "production" ? siteOrigin() : new URL(request.url).origin;
   if (request.headers.get("origin") !== origin || request.headers.get("sec-fetch-site") === "cross-site") return failure("INVALID_ORIGIN", 403);
   if (!/^application\/json(?:\s*;|$)/i.test(request.headers.get("content-type") ?? "")) return failure("INVALID_CONTENT_TYPE", 415);
   let auth;
