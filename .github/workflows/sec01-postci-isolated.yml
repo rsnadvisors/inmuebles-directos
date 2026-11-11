@@ -1,0 +1,65 @@
+name: SEC-01 synthetic post-CI
+
+on:
+  push:
+    branches: [codex/sec01-postci-isolated-g3-g4-20261111]
+    paths:
+      - .github/workflows/sec01-postci-isolated.yml
+      - tests/postci/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  isolated:
+    if: github.ref == 'refs/heads/codex/sec01-postci-isolated-g3-g4-20261111'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 22
+    env:
+      CANDIDATE_SHA: 4609ba3504d508a84d4adb97c38a92b07e60027a
+      ROLLBACK_SHA: ff2a21c21360d01642bb7ef506608eaff29af57d
+      NEXT_TELEMETRY_DISABLED: '1'
+      CI: 'true'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version-file: .node-version
+      - name: Verify exact commits and install local tools
+        run: |
+          git worktree add --detach "$RUNNER_TEMP/candidate" "$CANDIDATE_SHA"
+          git worktree add --detach "$RUNNER_TEMP/rollback" "$ROLLBACK_SHA"
+          test "$(git -C "$RUNNER_TEMP/candidate" rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test "$(git -C "$RUNNER_TEMP/rollback" rev-parse HEAD)" = "$ROLLBACK_SHA"
+          npm ci --prefix "$RUNNER_TEMP/candidate" --no-audit
+          cmp "$RUNNER_TEMP/candidate/package-lock.json" "$RUNNER_TEMP/rollback/package-lock.json"
+          npm ci --prefix "$RUNNER_TEMP/rollback" --no-audit
+          npm install --prefix "$RUNNER_TEMP/browser" --no-audit --no-fund --ignore-scripts playwright@1.57.0
+          "$RUNNER_TEMP/browser/node_modules/.bin/playwright" install chromium
+      - name: Start fresh loopback-only Expand LAB and Mailpit
+        id: lab
+        run: |
+          set -euo pipefail
+          test "$(docker context inspect --format '{{.Endpoints.docker.Host}}')" = unix:///var/run/docker.sock
+          test -z "${DOCKER_HOST:-}${SUPABASE_ACCESS_TOKEN:-}${DATABASE_URL:-}"
+          docker network create --opt com.docker.network.bridge.host_binding_ipv4=127.0.0.1 sec01-postci-net
+          mkdir -p "$RUNNER_TEMP/postci-lab/supabase/migrations"
+          export LAB_DIR="$RUNNER_TEMP/postci-lab"
+          python3 -B tests/postci/prepare_lab.py
+          cli="$RUNNER_TEMP/candidate/node_modules/.bin/supabase"
+          "$cli" start --network-id sec01-postci-net --workdir "$LAB_DIR" >"$RUNNER_TEMP/lab-start.log" 2>&1 || {
+            grep -Ei 'ERROR|failed|migration|SQLSTATE' "$RUNNER_TEMP/lab-start.log" | tail -12
+            exit 1
+          }
+          "$cli" status --workdir "$LAB_DIR" -o json >"$RUNNER_TEMP/lab-status.json" 2>/dev/null
+          python3 -B tests/postci/local_runtime.py
+      - name: G3 Mailpit password recovery
+        if: ${{ !cancelled() && steps.lab.outcome == 'success' }}
+        run: node tests/postci/exercise.mjs recovery
+      - name: G4 code rollback with Expand and saved records
+        if: ${{ !cancelled() && steps.lab.outcome == 'success' }}
+        run: node tests/postci/exercise.mjs rollback
