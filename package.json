@@ -10,6 +10,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@opennextjs/cloudflare": "1.20.17",
     "@supabase/ssr": "0.12.7",
     "@supabase/supabase-js": "^2.57.0",
     "leaflet": "1.9.4",
@@ -28,7 +29,8 @@
     "jsdom": "30.0.1",
     "supabase": "2.117.0",
     "typescript": "^5.0.0",
-    "vitest": "4.1.12"
+    "vitest": "4.1.12",
+    "wrangler": "4.162.0"
   },
   "engines": {
     "node": "24.20.0"
