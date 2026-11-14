@@ -14,7 +14,7 @@ export default async function PublishLayout({ children }: { children: React.Reac
   let recovery: Awaited<ReturnType<typeof getVerifiedUser>>;
   try { recovery = await getVerifiedUser(); }
   catch { return <p>No pudimos verificar tu cuenta. Vuelve a intentarlo más tarde.</p>; }
-  if (!recovery.client || !recovery.user) redirect("/login?returnTo=/publicar");
+  if (!recovery.client || !recovery.user || recovery.user.is_anonymous === true) redirect("/login?returnTo=/publicar");
   if (typeof recovery.user.id !== "string" || !recovery.user.id.trim()) return <p>No pudimos verificar tu cuenta. Vuelve a intentarlo más tarde.</p>;
   return <PublicationRecovery key={`recovery:${recovery.user.id}`} userId={recovery.user.id} canPublish={false} />;
 }

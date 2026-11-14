@@ -21,16 +21,31 @@ export default function SiteHeader({ query, onQueryChange, mobileFilters, onMobi
     const client = getBrowserClient();
     if (!client) { setAccount({ signedIn: false, name: "" }); return; }
     let active = true;
-    async function load() {
-      const { data, error } = await client!.auth.getUser();
-      if (!active) return;
-      if (error || !data.user) { setAccount({ signedIn: false, name: "" }); return; }
-      const { data: profile } = await client!.from("profiles").select("full_name").eq("id", data.user.id).maybeSingle();
-      if (active) setAccount({ signedIn: true, name: typeof profile?.full_name === "string" && profile.full_name.trim() ? profile.full_name.trim() : data.user.email || "Mi cuenta" });
+    let requestSequence = 0;
+    let authTimer: number | undefined;
+    async function load(request: number) {
+      try {
+        const { data, error } = await client!.auth.getUser();
+        if (!active || request !== requestSequence) return;
+        if (error || !data.user) { setAccount({ signedIn: false, name: "" }); return; }
+        let name = data.user.email || "Mi cuenta";
+        try {
+          const { data: profile, error: profileError } = await client!.from("profiles").select("full_name").eq("id", data.user.id).maybeSingle();
+          if (!profileError && typeof profile?.full_name === "string" && profile.full_name.trim()) name = profile.full_name.trim();
+        } catch { /* The optional profile must not block verified account navigation. */ }
+        if (active && request === requestSequence) setAccount({ signedIn: true, name });
+      } catch {
+        if (active && request === requestSequence) setAccount({ signedIn: false, name: "" });
+      }
     }
-    load();
-    const { data: subscription } = client.auth.onAuthStateChange(() => { window.setTimeout(() => { void load(); }, 0); });
-    return () => { active = false; subscription.subscription.unsubscribe(); };
+    void load(++requestSequence);
+    const { data: subscription } = client.auth.onAuthStateChange(() => {
+      const request = ++requestSequence;
+      setAccount(null);
+      window.clearTimeout(authTimer);
+      authTimer = window.setTimeout(() => { if (active && request === requestSequence) void load(request); }, 0);
+    });
+    return () => { active = false; window.clearTimeout(authTimer); subscription.subscription.unsubscribe(); };
   }, []);
   useEffect(() => {
     if (!menuOpen) return;
