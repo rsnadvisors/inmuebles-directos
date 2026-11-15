@@ -174,6 +174,18 @@ using (
                 and p.deletion_requested_at is not null)
 );
 
+-- Storage resuelve el borrado con DELETE ... RETURNING, que también exige poder leer la fila.
+drop policy if exists "owners read images of own listings being deleted" on storage.objects;
+create policy "owners read images of own listings being deleted" on storage.objects for select to authenticated
+using (
+  bucket_id = 'property-images-private'
+  and (storage.foldername(name))[1] = (select auth.uid())::text
+  and exists (select 1 from public.properties p
+              where p.id::text = (storage.foldername(objects.name))[2]
+                and p.owner_id = (select auth.uid()) and p.agent_id is null
+                and p.deletion_requested_at is not null)
+);
+
 revoke all on function private.owned_listing(uuid) from public, anon, authenticated;
 revoke all on function private.listing_summary(public.properties) from public, anon, authenticated;
 revoke all on function public.owner_update_listing(uuid, jsonb) from public, anon;
