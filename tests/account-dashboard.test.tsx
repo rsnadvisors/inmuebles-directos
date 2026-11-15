@@ -48,7 +48,7 @@ describe("Mis propiedades (panel)", () => {
     expect(srcs).toEqual(["/api/property-images/11111111-1111-4111-8111-111111111111",
       "/api/property-images/22222222-2222-4222-8222-222222222222/preview"]);
     expect(screen.getByText("Terreno en Venta · Castilla, Piura")).toBeTruthy();
-    expect(screen.getByText("Últimos 30 días: 12 visitas · 2 llamadas · 1 clic en WhatsApp")).toBeTruthy();
+    expect(screen.getByText("Últimos 30 días (aprox.): 12 visitas · 2 llamadas · 1 clic en WhatsApp")).toBeTruthy();
     expect(screen.getByText(/Vence el/)).toBeTruthy();
   });
 

@@ -88,7 +88,7 @@ describe("migración de la fase 3", () => {
     const table = sql.slice(sql.indexOf("create table if not exists private.listing_event_counts"), sql.indexOf(");", sql.indexOf("create table if not exists private.listing_event_counts")));
     expect(table).not.toMatch(/ip|user|agent|session/i);
     expect(sql).toMatch(/v_owner is not distinct from auth\.uid\(\) then return/);
-    expect(sql).toMatch(/where c\.count < 10000/);
+    expect(sql).toMatch(/where c.count < 1000;/);
   });
   it("reactivar reinicia la vigencia", () => {
     expect(sql).toMatch(/status = 'published', owner_paused = false, renewed_at = now\(\), expired_at = null/);

@@ -61,7 +61,9 @@ create table if not exists private.listing_event_counts (
 alter table private.listing_event_counts enable row level security;
 revoke all on private.listing_event_counts from public, anon, authenticated;
 
--- Registra un evento de un anuncio publicado. No cuenta al propio dueño. Tope de 10 000 por día y tipo.
+-- Registra un evento de un anuncio publicado. No cuenta al propio dueño. Tope de 1000 por día y tipo.
+-- Abierta a anon a propósito (el Worker no tiene clave de servicio): solo puede inflar cifras orientativas
+-- del propio anuncio, nunca leer ni modificar datos; el tope limita el efecto.
 create or replace function public.record_listing_event(p_id uuid, p_kind text)
 returns void language plpgsql security definer set search_path = '' as $fn$
 declare v_owner uuid; v_day date := (now() at time zone 'America/Lima')::date;
@@ -70,7 +72,7 @@ begin
   select p.owner_id into v_owner from public.properties p where p.id = p_id and p.status = 'published';
   if not found or v_owner is not distinct from auth.uid() then return; end if;
   insert into private.listing_event_counts as c (property_id, day, kind, count) values (p_id, v_day, p_kind, 1)
-  on conflict (property_id, day, kind) do update set count = c.count + 1 where c.count < 10000;
+  on conflict (property_id, day, kind) do update set count = c.count + 1 where c.count < 1000;
 end $fn$;
 
 -- Estadísticas del dueño: totales de sus anuncios en los últimos N días (1 a 365).

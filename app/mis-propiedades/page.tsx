@@ -44,7 +44,7 @@ function expiryText(row: Row): string {
 function statsText(s?: { view?: number | null; call?: number | null; whatsapp?: number | null }): string {
   const n = (v?: number | null) => Number(v ?? 0);
   const plural = (v: number, one: string, many: string) => `${v.toLocaleString("es-PE")} ${v === 1 ? one : many}`;
-  return `Últimos 30 días: ${plural(n(s?.view), "visita", "visitas")} · ${plural(n(s?.call), "llamada", "llamadas")} · ${plural(n(s?.whatsapp), "clic", "clics")} en WhatsApp`;
+  return `Últimos 30 días (aprox.): ${plural(n(s?.view), "visita", "visitas")} · ${plural(n(s?.call), "llamada", "llamadas")} · ${plural(n(s?.whatsapp), "clic", "clics")} en WhatsApp`;
 }
 
 export default async function MyProperties({ searchParams }: { searchParams?: Promise<Record<string, string | string[] | undefined>> } = {}) {
