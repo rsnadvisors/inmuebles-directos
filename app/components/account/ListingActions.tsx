@@ -3,10 +3,10 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
-import { ACTION_CONFIRM, ACTION_LABELS, availableActions, type ListingAction } from "../../lib/listing-management";
+import { ACTION_CONFIRM, ACTION_LABELS, availableActions, LISTING_TTL_DAYS, type ListingAction } from "../../lib/listing-management";
 
 type Props = { id: string; title: string; slug: string; status: string; listingType: string; isReserved: boolean;
-  ownerPaused: boolean; deletionRequestedAt: string | null; publishedAt: string | null };
+  ownerPaused: boolean; deletionRequestedAt: string | null; publishedAt: string | null; renewedAt?: string | null };
 
 const DELETE_CONFIRM = (title: string) => `Vas a eliminar definitivamente «${title}» y sus fotos. Esta acción no se puede deshacer.\n\nSi solo se vendió o alquiló, usa «Marcar como vendido/alquilado» en su lugar.\n\n¿Eliminar el anuncio?`;
 
@@ -17,7 +17,7 @@ export default function ListingActions(props: Props) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const { actions, canEdit, canDelete, deleting, moderated } = availableActions({ status: props.status, listing_type: props.listingType,
-    is_reserved: props.isReserved, owner_paused: props.ownerPaused, deletion_requested_at: props.deletionRequestedAt, published_at: props.publishedAt });
+    is_reserved: props.isReserved, owner_paused: props.ownerPaused, deletion_requested_at: props.deletionRequestedAt, published_at: props.publishedAt, renewed_at: props.renewedAt ?? null });
 
   async function send(body: Record<string, unknown>, confirmText?: string) {
     if (pending.current) return;
@@ -31,7 +31,7 @@ export default function ListingActions(props: Props) {
         if (response.status === 401) window.location.assign("/login?returnTo=/mis-propiedades");
         return;
       }
-      setMessage(body.op === "delete" ? "Anuncio eliminado." : "Cambios guardados.");
+      setMessage(body.op === "delete" ? "Anuncio eliminado." : body.action === "renew" ? `Renovado: seguirá publicado otros ${LISTING_TTL_DAYS} días.` : "Cambios guardados.");
       router.refresh();
     } catch {
       setMessage("No pudimos conectar con el servidor. Inténtalo de nuevo.");

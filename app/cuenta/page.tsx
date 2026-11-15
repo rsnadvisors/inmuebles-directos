@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getVerifiedUser } from "../lib/auth-server";
+import { daysLeft, listingExpiry, RENEW_WINDOW_DAYS } from "../lib/listing-management";
 import { DashboardAuthorizationError } from "../lib/admin-auth-server";
 import { loadOwnInventoryOverview } from "../lib/analytics/inventory-dashboard-server";
 import InventoryOverview from "../components/analytics/InventoryOverview";
@@ -15,7 +16,13 @@ const memberSince = new Intl.DateTimeFormat("es-PE", { month: "long", year: "num
 export default async function Account({ searchParams }: { searchParams?: Promise<Record<string, string | string[] | undefined>> } = {}) {
   const { client, user } = await getVerifiedUser();
   if (!client || !user) redirect("/login?returnTo=/cuenta");
-  const { data: profile } = await client.from("profiles").select("full_name").eq("id", user.id).maybeSingle();
+  const [{ data: profile }, { data: listings }] = await Promise.all([
+    client.from("profiles").select("full_name").eq("id", user.id).maybeSingle(),
+    client.from("properties").select("status,published_at,renewed_at,expired_at,deletion_requested_at").eq("owner_id", user.id),
+  ]);
+  const own = (listings ?? []) as { status: string; published_at: string | null; renewed_at: string | null; expired_at: string | null; deletion_requested_at: string | null }[];
+  const expiring = own.filter(r => r.status === "published" && !r.deletion_requested_at && (daysLeft(listingExpiry(r)) ?? 99) <= RENEW_WINDOW_DAYS).length;
+  const expired = own.filter(r => r.status === "archived" && r.expired_at && !r.deletion_requested_at).length;
   const display = typeof profile?.full_name === "string" && profile.full_name.trim() ? profile.full_name.trim() : user.email || "Mi cuenta";
   const confirmed = Boolean((user as { email_confirmed_at?: string | null }).email_confirmed_at);
   const created = (user as { created_at?: string }).created_at;
@@ -34,6 +41,11 @@ export default async function Account({ searchParams }: { searchParams?: Promise
   return (
     <AccountShell active="resumen" name={display} email={user.email} title="Mi cuenta" subtitle="Tu perfil, tus accesos y el estado de tus anuncios."
       action={<Link href="/publicar" className="acct-btn">Publicar propiedad</Link>}>
+      {(expiring > 0 || expired > 0) && <div className="acct-alert" role="status">
+        {expiring > 0 && <>{expiring === 1 ? "Un anuncio vence" : `${expiring} anuncios vencen`} en los próximos {RENEW_WINDOW_DAYS} días. </>}
+        {expired > 0 && <>{expired === 1 ? "Un anuncio caducó" : `${expired} anuncios caducaron`} y ya no se muestran en el mapa. </>}
+        <Link href="/mis-propiedades">Revisar en Mis propiedades</Link>
+      </div>}
       <section className="acct-profile" aria-label="Perfil">
         <span className="acct-avatar" aria-hidden="true">{initials(display)}</span>
         <div>

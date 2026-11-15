@@ -312,6 +312,7 @@ def main():
     cancel(replay)
     owner_management(done['requestId'])
     owner_photos()
+    expiry_and_stats()
     account_deletion()
     # Antispam: at most five new attempts per owner in a rolling 24 h window (cancelled ones count).
     recent=admin("select count(*) from private.publication_attempts where owner_id='"+A+"' and created_at>now()-interval '24 hours';")
@@ -423,6 +424,32 @@ def owner_photos():
     for _ in range(4):
         status,_=rpc('owner_begin_image_upload',{'p_id':listing,'p_mime':'image/png','p_size':len(PNG)},B); assert status==200,status
     status,_=rpc('owner_begin_image_upload',{'p_id':listing,'p_mime':'image/png','p_size':len(PNG)},B); deny_http('sixth photo slot denied',status)
+
+def expiry_and_stats():
+    """Fase 3: contadores agregados sin datos personales y caducidad solo por service_role."""
+    listing=admin("select id from public.properties where owner_id='"+B+"' and status='published' order by created_at limit 1;")
+    views=lambda: admin("select coalesce(sum(count),0) from private.listing_event_counts where property_id='"+listing+"' and kind='view';")
+    status,_=rpc('record_listing_event',{'p_id':listing,'p_kind':'view'},None); record('anonymous visit is counted',status in (200,204) and views()=='1',http=status)
+    status,_=rpc('record_listing_event',{'p_id':listing,'p_kind':'view'},B); record('owner own visit is not counted',status in (200,204) and views()=='1',http=status)
+    status,_=rpc('record_listing_event',{'p_id':listing,'p_kind':'purchase'},A); record('unknown event kind ignored',status in (200,204) and admin("select count(*) from private.listing_event_counts where property_id='"+listing+"' and kind not in ('view','call','whatsapp');")=='0',http=status)
+    status,_=http('GET','listing_event_counts?select=*',None); deny_http('event table not exposed',status)
+    status,mine=rpc('owner_listing_stats',{'p_days':30},B); record('owner sees own stats',status==200 and mine.get(listing,{}).get('view')==1,http=status)
+    status,other=rpc('owner_listing_stats',{'p_days':30},A); record('other user does not see foreign stats',status==200 and listing not in other,http=status)
+    status,_=rpc('owner_listing_stats',{'p_days':30},None); deny_http('anonymous cannot read stats',status)
+    for uid,label in [(A,'authenticated'),(None,'anonymous')]:
+        status,_=rpc('expire_stale_listings',{},uid); deny_http(label+' cannot run expiry job',status)
+    q="select status||':'||owner_paused||':'||(expired_at is not null) from public.properties where id='"+listing+"';"
+    admin("update public.properties set published_at=now()-interval '100 days', renewed_at=null where id='"+listing+"';")
+    admin("select public.expire_stale_listings();")
+    record('job pauses listings older than 90 days',admin(q)=='archived:true:true',value=admin(q))
+    status,data=http('GET','properties?id=eq.'+listing+'&select=id',None); record('expired listing hidden from public',status==200 and json.loads(data)==[],http=status)
+    status,_=rpc('owner_set_listing_status',{'p_id':listing,'p_action':'renew'},B); deny_http('expired listing cannot be renewed in place',status)
+    status,_=rpc('owner_set_listing_status',{'p_id':listing,'p_action':'reactivate'},B)
+    record('owner republishes expired listing with a fresh term',status==200 and admin(q)=='published:false:false'
+      and admin("select renewed_at > now()-interval '1 minute' from public.properties where id='"+listing+"';")=='t',http=status)
+    admin("select public.expire_stale_listings();"); record('fresh term is not expired again',admin(q)=='published:false:false')
+    status,_=rpc('owner_set_listing_status',{'p_id':listing,'p_action':'renew'},A); deny_http('other user cannot renew',status)
+    status,_=rpc('owner_set_listing_status',{'p_id':listing,'p_action':'renew'},B); record('owner renews published listing',status==200,http=status)
 
 def account_deletion():
     """Fase 2: baja de cuenta solo sin anuncios; borra perfil y usuario."""

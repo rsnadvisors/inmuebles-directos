@@ -5,7 +5,7 @@ import { formatPrice } from "../lib/inventory";
 import { resolvePropertyImage } from "../lib/property-image-source";
 import AccountShell from "../components/account/AccountShell";
 import ListingActions from "../components/account/ListingActions";
-import { listingStatusLabel } from "../lib/listing-management";
+import { daysLeft, listingExpiry, listingStatusLabel } from "../lib/listing-management";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +22,7 @@ const dateFormat = new Intl.DateTimeFormat("es-PE", { day: "numeric", month: "sh
 type Row = { id: string; title: string; slug: string; status: string; price: number; currency: string; property_type: string; listing_type: string;
   district: string | null; city: string | null; published_at: string | null; created_at: string;
   is_reserved?: boolean | null; owner_paused?: boolean | null; deletion_requested_at?: string | null;
+  renewed_at?: string | null; expired_at?: string | null;
   property_images?: { id: string; storage_bucket: string | null; public_url: string | null; sort_order: number; is_cover: boolean }[] };
 
 function cover(row: Row): string | null {
@@ -33,15 +34,31 @@ function cover(row: Row): string | null {
   return src && row.status !== "published" && src.startsWith("/api/property-images/") ? `${src}/preview` : src;
 }
 
+function expiryText(row: Row): string {
+  if (row.status !== "published" || row.deletion_requested_at) return "";
+  const expiry = listingExpiry(row);
+  const left = daysLeft(expiry);
+  if (!expiry || left === null) return "";
+  return left <= 0 ? " · Vence hoy" : ` · Vence el ${dateFormat.format(expiry)}${left <= 15 ? ` (en ${left} ${left === 1 ? "día" : "días"})` : ""}`;
+}
+function statsText(s?: { view?: number | null; call?: number | null; whatsapp?: number | null }): string {
+  const n = (v?: number | null) => Number(v ?? 0);
+  const plural = (v: number, one: string, many: string) => `${v.toLocaleString("es-PE")} ${v === 1 ? one : many}`;
+  return `Últimos 30 días (aprox.): ${plural(n(s?.view), "visita", "visitas")} · ${plural(n(s?.call), "llamada", "llamadas")} · ${plural(n(s?.whatsapp), "clic", "clics")} en WhatsApp`;
+}
+
 export default async function MyProperties({ searchParams }: { searchParams?: Promise<Record<string, string | string[] | undefined>> } = {}) {
   const { client, user } = await getVerifiedUser();
   if (!client || !user) redirect("/login?returnTo=/mis-propiedades");
-  const [{ data: profile }, { data, error }] = await Promise.all([
+  const [{ data: profile }, { data, error }, statsResult] = await Promise.all([
     client.from("profiles").select("full_name").eq("id", user.id).maybeSingle(),
     client.from("properties")
-      .select("id,title,slug,status,price,currency,property_type,listing_type,district,city,published_at,created_at,is_reserved,owner_paused,deletion_requested_at,property_images(id,storage_bucket,public_url,sort_order,is_cover)")
+      .select("id,title,slug,status,price,currency,property_type,listing_type,district,city,published_at,created_at,is_reserved,owner_paused,deletion_requested_at,renewed_at,expired_at,property_images(id,storage_bucket,public_url,sort_order,is_cover)")
       .eq("owner_id", user.id).order("created_at", { ascending: false }),
+    // Aggregated, owner-only counters; a failure here never hides the listings.
+    Promise.resolve(client.rpc("owner_listing_stats", { p_days: 30 })).catch(() => ({ data: null })),
   ]);
+  const stats = (statsResult?.data ?? {}) as Record<string, { view?: number | null; call?: number | null; whatsapp?: number | null }>;
   const display = typeof profile?.full_name === "string" && profile.full_name.trim() ? profile.full_name.trim() : user.email || "Mi cuenta";
   const rows = (data ?? []) as Row[];
   const query = await searchParams ?? {};
@@ -73,7 +90,8 @@ export default async function MyProperties({ searchParams }: { searchParams?: Pr
                 <div className="acct-row-info">
                   <h2>{row.title}</h2>
                   <p>{[TYPE[row.property_type], OPERATION[row.listing_type]].filter(Boolean).join(" en ")}{place && ` · ${place}`}</p>
-                  <p>{row.published_at ? "Publicado el" : "Creado el"} {dateFormat.format(new Date(when))}</p>
+                  <p>{row.published_at ? "Publicado el" : "Creado el"} {dateFormat.format(new Date(when))}{expiryText(row)}</p>
+                  {row.status !== "draft" && <p className="acct-stats">{statsText(stats[row.id])}</p>}
                 </div>
                 <div className="acct-row-price">
                   <strong>{formatPrice(row.price, row.currency === "PEN" || row.currency === "USD" ? row.currency : null)}</strong>
@@ -81,7 +99,7 @@ export default async function MyProperties({ searchParams }: { searchParams?: Pr
                 </div>
                 <div className="acct-row-actions">
                   <ListingActions id={row.id} title={row.title} slug={row.slug} status={row.status} listingType={row.listing_type}
-                    isReserved={!!row.is_reserved} ownerPaused={!!row.owner_paused} deletionRequestedAt={row.deletion_requested_at ?? null} publishedAt={row.published_at} />
+                    isReserved={!!row.is_reserved} ownerPaused={!!row.owner_paused} deletionRequestedAt={row.deletion_requested_at ?? null} publishedAt={row.published_at} renewedAt={row.renewed_at ?? null} />
                 </div>
               </li>;
             })}

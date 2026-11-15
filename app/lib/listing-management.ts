@@ -2,7 +2,21 @@ import { normalizeContactPhone } from "./contact-phone";
 import { MAX_PRICE } from "./publication";
 
 /** Gestión de anuncios por su dueño (fase 1): validación compartida por el formulario y la ruta del servidor. */
-export const LISTING_ACTIONS = ["mark_sold", "mark_rented", "reserve", "unreserve", "pause", "reactivate"] as const;
+export const LISTING_ACTIONS = ["mark_sold", "mark_rented", "reserve", "unreserve", "pause", "renew", "reactivate"] as const;
+/** Vigencia de un anuncio publicado, contada desde su publicación o última renovación (igual que en la base de datos). */
+export const LISTING_TTL_DAYS = 90;
+/** Desde cuántos días antes del vencimiento se ofrece «Renovar». */
+export const RENEW_WINDOW_DAYS = 15;
+const DAY_MS = 86_400_000;
+export function listingExpiry(row: { published_at?: string | null; renewed_at?: string | null }): Date | null {
+  const start = row.renewed_at ?? row.published_at;
+  if (!start) return null;
+  const date = new Date(new Date(start).getTime() + LISTING_TTL_DAYS * DAY_MS);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+export function daysLeft(expiry: Date | null, now = Date.now()): number | null {
+  return expiry ? Math.ceil((expiry.getTime() - now) / DAY_MS) : null;
+}
 export type ListingAction = typeof LISTING_ACTIONS[number];
 /** Frase que el usuario escribe para confirmar la baja de su cuenta. */
 export const ACCOUNT_DELETION_PHRASE = "ELIMINAR";
@@ -72,12 +86,14 @@ export function validateListingEdit(input: Record<string, unknown>, propertyType
 
 /** Acciones disponibles según el estado (espejo de las transiciones permitidas en la base de datos). */
 export function availableActions(row: { status: string; listing_type: string; is_reserved?: boolean | null;
-  owner_paused?: boolean | null; deletion_requested_at?: string | null; published_at?: string | null }) {
+  owner_paused?: boolean | null; deletion_requested_at?: string | null; published_at?: string | null; renewed_at?: string | null }, now = Date.now()) {
   const deleting = !!row.deletion_requested_at;
   const moderated = row.status === "archived" && !row.owner_paused && !deleting;
   const actions: ListingAction[] = [];
   if (!deleting && row.status === "published") {
     actions.push(row.listing_type === "rent" ? "mark_rented" : "mark_sold", row.is_reserved ? "unreserve" : "reserve", "pause");
+    const left = daysLeft(listingExpiry(row), now);
+    if (left !== null && left <= RENEW_WINDOW_DAYS) actions.push("renew");
   }
   if (!deleting && row.published_at && ((row.status === "archived" && row.owner_paused) || row.status === "sold" || row.status === "rented")) actions.push("reactivate");
   return {
@@ -88,16 +104,16 @@ export function availableActions(row: { status: string; listing_type: string; is
   };
 }
 
-export function listingStatusLabel(row: { status: string; is_reserved?: boolean | null; owner_paused?: boolean | null; deletion_requested_at?: string | null }): string {
+export function listingStatusLabel(row: { status: string; is_reserved?: boolean | null; owner_paused?: boolean | null; deletion_requested_at?: string | null; expired_at?: string | null }): string {
   if (row.deletion_requested_at) return "Eliminación pendiente";
   if (row.status === "published") return row.is_reserved ? "Reservado" : "Publicado";
-  if (row.status === "archived") return row.owner_paused ? "Pausado" : "Archivado por revisión";
+  if (row.status === "archived") return row.owner_paused ? (row.expired_at ? "Caducado" : "Pausado") : "Archivado por revisión";
   return ({ draft: "Borrador", reserved: "Reservado", sold: "Vendido", rented: "Alquilado" } as Record<string, string>)[row.status] ?? row.status;
 }
 
 export const ACTION_LABELS: Record<ListingAction, string> = {
   mark_sold: "Marcar como vendido", mark_rented: "Marcar como alquilado", reserve: "Marcar como reservado",
-  unreserve: "Quitar «Reservado»", pause: "Pausar anuncio", reactivate: "Volver a publicar",
+  unreserve: "Quitar «Reservado»", pause: "Pausar anuncio", renew: "Renovar: sigue disponible", reactivate: "Volver a publicar",
 };
 export const ACTION_CONFIRM: Partial<Record<ListingAction, string>> = {
   mark_sold: "El anuncio dejará de mostrarse en el mapa y pasará a «Cerradas». Podrás volver a publicarlo si la venta no se concreta. ¿Continuar?",
