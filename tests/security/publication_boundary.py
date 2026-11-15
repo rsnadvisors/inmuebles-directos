@@ -329,6 +329,10 @@ def main():
     counts={result:sum(r['result']==result for r in ROWS) for result in ('PASS','FAIL','NOT REPRODUCIBLE')}
     print('Real isolated publication REST/Storage:',json.dumps(counts,sort_keys=True))
 
+def bulk_remove(paths,uid):
+    # Same endpoint supabase-js storage.remove() uses (the single-object DELETE is always refused for this bucket).
+    return http('DELETE','object/property-images-private',uid,json.dumps({'prefixes':paths}).encode(),storage=True)
+
 def owner_management(listing):
     """Fase 1 de gestión: solo funciones controladas, solo el dueño, solo transiciones válidas."""
     q="select status||':'||is_reserved||':'||owner_paused||':'||price::text||':'||coalesce(deletion_requested_at::text,'-') from public.properties where id='"+listing+"';"
@@ -357,15 +361,15 @@ def owner_management(listing):
     status,_=rpc('owner_update_listing',{'p_id':listing,'p_fields':edit}); deny_http('moderated listing cannot be edited by owner',status)
     admin("update public.properties set status='published' where id='"+listing+"';")
     paths=json.loads(admin("select coalesce(json_agg(storage_path),'[]') from public.property_images where property_id='"+listing+"';"))
-    status,_=http('DELETE','object/property-images-private/'+paths[0],A,storage=True); obj=admin("select count(*) from storage.objects where name='"+paths[0]+"';")
+    status,_=bulk_remove([paths[0]],A); obj=admin("select count(*) from storage.objects where name='"+paths[0]+"';")
     record('published images cannot be deleted by owner before deletion request',obj=='1',http=status)
     status,_=rpc('owner_finish_listing_deletion',{'p_id':listing}); deny_http('finish without begin rejected',status)
     status,begun=rpc('owner_begin_listing_deletion',{'p_id':listing}); record('deletion begins and hides listing',status==200 and admin(q).startswith('archived:false:false') and sorted(begun['paths'])==sorted(paths),http=status)
     status,_=rpc('owner_finish_listing_deletion',{'p_id':listing}); deny_http('finish refused while images remain',status)
-    status,_=http('DELETE','object/property-images-private/'+paths[0],B,storage=True)
+    status,_=bulk_remove([paths[0]],B)
     record('other user cannot delete images of a listing being deleted',admin("select count(*) from storage.objects where name='"+paths[0]+"';")=='1',http=status)
-    for path in paths:
-        status,_=http('DELETE','object/property-images-private/'+path,A,storage=True); assert status==200,status
+    status,_=bulk_remove(paths,A)
+    record('owner removes all images of own listing being deleted',status==200 and admin("select count(*) from storage.objects where bucket_id='property-images-private' and name in ("+",".join("'"+x+"'" for x in paths)+");")=='0',http=status)
     status,_=rpc('owner_finish_listing_deletion',{'p_id':listing}); record('owner deletion completes',status==200 and admin("select count(*) from public.properties where id='"+listing+"';")=='0'
       and admin("select count(*) from public.property_images where property_id='"+listing+"';")=='0',http=status)
 
