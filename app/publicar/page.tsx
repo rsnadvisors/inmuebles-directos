@@ -73,6 +73,7 @@ export default function PublishPage() {
     const form = event.currentTarget;
     try {
       const payload = new FormData(form);
+      payload.delete("cf-turnstile-response"); // defensive: never send widget internals as listing fields
       payload.set("latitude", coords.latitude);
       payload.set("longitude", coords.longitude);
       payload.set("coordinatesConfirmed", String(coordinatesConfirmed));
