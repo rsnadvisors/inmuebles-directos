@@ -2,30 +2,14 @@ import { getVerifiedUser } from "../../lib/auth-server";
 import { isSamePublicationOrigin } from "../../lib/request-origin";
 import { BodyReadError, JSON_BODY_TIMEOUT_MS, readBoundedBody } from "../../lib/bounded-body";
 import { LISTING_ACTIONS, LISTING_ID, ListingValidationError, validateListingEdit, type ListingAction } from "../../lib/listing-management";
-import { PRIVATE_PROPERTY_IMAGE_BUCKET } from "../../lib/property-images";
+import { failure, OWNER_ERRORS, ownerFailure, reply, rpcFailure } from "../../lib/owner-api";
+import { cleanupPendingImages, deleteOwnListing } from "../../lib/owner-storage";
+import { LISTING_ID as IMAGE_ID } from "../../lib/listing-management";
 
 export const runtime = "nodejs";
-const reply = (status: number, body: Record<string, unknown>) => Response.json(body, { status });
-const failure = (code: string, message: string, status: number) => reply(status, { ok: false, code, message });
+const RPC_ERRORS = OWNER_ERRORS;
 
-const RPC_ERRORS: Record<string, [number, string]> = {
-  LISTING_NOT_FOUND: [404, "No encontramos ese anuncio en tu cuenta."],
-  LISTING_NOT_EDITABLE: [409, "Este anuncio no se puede modificar en su estado actual."],
-  INVALID_TRANSITION: [409, "Esa acción no está disponible para el estado actual del anuncio. Recarga la página."],
-  INVALID_FIELDS: [400, "Algún dato no es válido. Revisa el formulario."],
-  AUTH_REQUIRED: [401, "Inicia sesión para gestionar tus anuncios."],
-  IMAGES_REMAIN: [502, "No pudimos borrar todas las fotos. El anuncio ya está oculto; vuelve a intentar eliminarlo."],
-  DELETION_NOT_REQUESTED: [409, "Vuelve a intentar la eliminación."],
-  LEGACY_IMAGES: [409, "Este anuncio antiguo no se puede eliminar desde aquí. Escríbenos y lo eliminamos por ti."],
-};
-function rpcFailure(error: { message?: string; code?: string } | null): Response {
-  const known = error?.message && RPC_ERRORS[error.message];
-  if (known) return failure(error!.message!, known[1], known[0]);
-  if (error?.code === "PT404") return failure("LISTING_NOT_FOUND", RPC_ERRORS.LISTING_NOT_FOUND[1], 404);
-  return failure("MANAGEMENT_UNAVAILABLE", "No pudimos completar la operación. Inténtalo más tarde.", 503);
-}
-
-/** Una sola ruta para editar, cambiar el estado o eliminar un anuncio propio. La titularidad la verifica la base de datos. */
+/** Una sola ruta para editar, cambiar el estado, ordenar o quitar fotos y eliminar un anuncio propio. La titularidad la verifica la base de datos. */
 export async function POST(request: Request): Promise<Response> {
   if (!isSamePublicationOrigin(request)) return failure("INVALID_ORIGIN", "La solicitud debe iniciarse desde este sitio.", 403);
   if (!/^application\/json(?:\s*;|$)/i.test(request.headers.get("content-type") ?? "")) return failure("INVALID_CONTENT_TYPE", "Formato no válido.", 415);
@@ -70,17 +54,26 @@ export async function POST(request: Request): Promise<Response> {
     }
     if (input.op === "delete") {
       if (Object.keys(input).sort().join(",") !== "id,op") return failure("INVALID_REQUEST", "No se pudo leer la solicitud.", 400);
-      const begun = await client.rpc("owner_begin_listing_deletion", { p_id: id });
-      if (begun.error) return rpcFailure(begun.error);
-      const paths = (begun.data as { paths?: unknown })?.paths;
-      const owned = Array.isArray(paths) ? paths.filter((p): p is string => typeof p === "string" && p.startsWith(`${user.id}/${id}/`)) : [];
-      if (owned.length) {
-        // Storage policy only lets the owner remove objects of listings with a pending deletion.
-        const removed = await client.storage.from(PRIVATE_PROPERTY_IMAGE_BUCKET).remove(owned);
-        if (removed.error) return failure("IMAGES_REMAIN", RPC_ERRORS.IMAGES_REMAIN[1], 502);
+      const result = await deleteOwnListing(client, user.id, id);
+      return result.ok ? reply(200, { ok: true, deleted: true }) : ownerFailure(result.code);
+    }
+    if (input.op === "image-remove") {
+      if (Object.keys(input).sort().join(",") !== "id,imageId,op" || typeof input.imageId !== "string" || !IMAGE_ID.test(input.imageId)) {
+        return failure("INVALID_REQUEST", "No se pudo leer la solicitud.", 400);
       }
-      const finished = await client.rpc("owner_finish_listing_deletion", { p_id: id });
-      return finished.error ? rpcFailure(finished.error) : reply(200, { ok: true, deleted: true });
+      const { error } = await client.rpc("owner_remove_listing_image", { p_id: id, p_image_id: input.imageId });
+      if (error) return rpcFailure(error);
+      await cleanupPendingImages(client, user.id);
+      return reply(200, { ok: true });
+    }
+    if (input.op === "image-order") {
+      const order = input.order;
+      if (Object.keys(input).sort().join(",") !== "id,op,order" || !Array.isArray(order) || order.length < 1 || order.length > 5
+          || !order.every(x => typeof x === "string" && IMAGE_ID.test(x))) {
+        return failure("INVALID_REQUEST", "No se pudo leer la solicitud.", 400);
+      }
+      const { error } = await client.rpc("owner_set_image_order", { p_id: id, p_order: order });
+      return error ? rpcFailure(error) : reply(200, { ok: true });
     }
     return failure("INVALID_REQUEST", "Operación no válida.", 400);
   } catch {

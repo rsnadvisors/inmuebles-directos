@@ -16,12 +16,12 @@ export async function GET(_request: Request, { params }: { params: Promise<{ ima
     if (image.error) throw new Error("Image metadata unavailable");
     if (!image.data) return new Response(null, { status: 404, headers: NO_STORE });
     const property = await client.from("properties").select("id").eq("id", image.data.property_id)
-      .eq("owner_id", user.id).eq("status", "draft").maybeSingle();
+      .eq("owner_id", user.id).maybeSingle(); // the owner previews own photos in any state (draft, paused, sold…)
     if (property.error) throw new Error("Property ownership unavailable");
     if (!property.data) return new Response(null, { status: 404, headers: NO_STORE });
     const downloaded = await client.storage.from(PRIVATE_PROPERTY_IMAGE_BUCKET).download(image.data.storage_path);
     if (downloaded.error || !downloaded.data || !["image/jpeg", "image/png", "image/webp"].includes(downloaded.data.type)) {
-      throw new Error("Draft image unavailable");
+      throw new Error("Owner image unavailable");
     }
     return imageResponse(downloaded.data, "private, no-store");
   } catch {

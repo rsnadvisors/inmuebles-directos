@@ -4,6 +4,8 @@ import { MAX_PRICE } from "./publication";
 /** Gestión de anuncios por su dueño (fase 1): validación compartida por el formulario y la ruta del servidor. */
 export const LISTING_ACTIONS = ["mark_sold", "mark_rented", "reserve", "unreserve", "pause", "reactivate"] as const;
 export type ListingAction = typeof LISTING_ACTIONS[number];
+/** Frase que el usuario escribe para confirmar la baja de su cuenta. */
+export const ACCOUNT_DELETION_PHRASE = "ELIMINAR";
 export const LISTING_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 export type EditableListing = {

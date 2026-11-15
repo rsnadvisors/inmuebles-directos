@@ -21,7 +21,7 @@ A='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'; B='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb
 def record(name,ok,**evidence):
     ROWS.append({'check':name,'result':'PASS' if ok else 'FAIL',**evidence})
     (WORK/'security-results.json').write_text(json.dumps(ROWS,indent=2))
-    assert ok,name
+    assert ok,name+(' '+json.dumps(evidence,default=str)[:400] if evidence else '')
 def admin(s): return lab.sql(s).strip()
 def enc(b): return base64.urlsafe_b64encode(b).rstrip(b'=').decode()
 ST=lab.config(lab.STORAGE); RT=lab.config(lab.REST)
@@ -311,6 +311,8 @@ def main():
     status,_=finalize(replay); deny_http('deleted parent cannot finalize',status)
     cancel(replay)
     owner_management(done['requestId'])
+    owner_photos()
+    account_deletion()
     # Antispam: at most five new attempts per owner in a rolling 24 h window (cancelled ones count).
     recent=admin("select count(*) from private.publication_attempts where owner_id='"+A+"' and created_at>now()-interval '24 hours';")
     record('owner reached five attempts in 24 h',int(recent)>=5)
@@ -372,6 +374,67 @@ def owner_management(listing):
     record('owner removes all images of own listing being deleted',status==200 and admin("select count(*) from storage.objects where bucket_id='property-images-private' and name in ("+",".join("'"+x+"'" for x in paths)+");")=='0',http=status)
     status,_=rpc('owner_finish_listing_deletion',{'p_id':listing}); record('owner deletion completes',status==200 and admin("select count(*) from public.properties where id='"+listing+"';")=='0'
       and admin("select count(*) from public.property_images where property_id='"+listing+"';")=='0',http=status)
+
+def owner_photos():
+    """Fase 2: fotos de anuncios publicados solo por subida reservada, del dueño y verificada."""
+    listing=admin("select id from public.properties where owner_id='"+B+"' and status='published' order by created_at limit 1;")
+    assert listing, 'B published listing'
+    count=lambda: int(admin("select count(*) from public.property_images where property_id='"+listing+"';"))
+    exists=lambda path: admin("select count(*) from storage.objects where bucket_id='property-images-private' and name='"+path+"';")=='1'
+    before=count()
+    status,_=rpc('owner_begin_image_upload',{'p_id':listing,'p_mime':'image/png','p_size':len(PNG)},A); deny_http('other user cannot reserve photo upload',status)
+    status,_=rpc('owner_begin_image_upload',{'p_id':listing,'p_mime':'image/gif','p_size':len(PNG)},B); deny_http('photo type outside allow-list rejected',status)
+    status,_=http('POST','object/property-images-private/'+B+'/'+listing+'/'+str(uuid.uuid4())+'.png',B,PNG,'image/png',True)
+    deny_http('unreserved photo path upload denied',status)
+    status,res=rpc('owner_begin_image_upload',{'p_id':listing,'p_mime':'image/png','p_size':len(PNG)},B); record('owner reserves photo upload',status==200,http=status,body=res)
+    path=res['path']; record('reserved path is inside owner and listing folder',path.startswith(B+'/'+listing+'/') and path.endswith('.png'))
+    status,_=http('POST','object/property-images-private/'+path,A,PNG,'image/png',True); deny_http('other user cannot upload to reserved path',status)
+    status,_=http('POST','object/property-images-private/'+path,B,PNG,'image/jpeg',True); deny_http('reserved path refuses another content type',status)
+    status,_=http('POST','object/property-images-private/'+path,B,PNG,'image/png',True); record('owner uploads reserved photo',status==200,http=status)
+    status,_=rpc('owner_finish_image_upload',{'p_id':listing,'p_image_id':res['image_id']},A); deny_http('other user cannot confirm photo',status)
+    status,done=rpc('owner_finish_image_upload',{'p_id':listing,'p_image_id':res['image_id']},B)
+    record('owner confirms photo and it joins the listing',status==200 and done['accepted'] is True and count()==before+1,http=status)
+    status,_=http('POST','object/property-images-private/'+path,B,PNG,'image/png',True); deny_http('confirmed path cannot be re-uploaded',status)
+    status,bad=rpc('owner_begin_image_upload',{'p_id':listing,'p_mime':'image/png','p_size':len(PNG)+7},B)
+    status,_=http('POST','object/property-images-private/'+bad['path'],B,PNG,'image/png',True)
+    status,rej=rpc('owner_finish_image_upload',{'p_id':listing,'p_image_id':bad['image_id']},B)
+    record('size mismatch is rejected, not attached',status==200 and rej['accepted'] is False and count()==before+1,http=status)
+    status,_=bulk_remove([bad['path']],A); record('other user cannot delete rejected bytes',exists(bad['path']),http=status)
+    status,_=bulk_remove([bad['path']],B); record('owner deletes rejected bytes',not exists(bad['path']),http=status)
+    ids=json.loads(admin("select json_agg(id order by sort_order) from public.property_images where property_id='"+listing+"';"))
+    status,_=rpc('owner_set_image_order',{'p_id':listing,'p_order':ids[1:]},B); deny_http('partial order rejected',status)
+    status,_=rpc('owner_set_image_order',{'p_id':listing,'p_order':list(reversed(ids))},A); deny_http('other user cannot reorder',status)
+    status,_=rpc('owner_set_image_order',{'p_id':listing,'p_order':list(reversed(ids))},B)
+    record('owner reorders and picks cover',status==200 and admin("select id from public.property_images where property_id='"+listing+"' and is_cover;")==ids[-1]
+      and admin("select count(*) from public.property_images where property_id='"+listing+"' and is_cover;")=='1',http=status)
+    status,_=rpc('owner_remove_listing_image',{'p_id':listing,'p_image_id':res['image_id']},A); deny_http('other user cannot remove photo',status)
+    status,removed=rpc('owner_remove_listing_image',{'p_id':listing,'p_image_id':res['image_id']},B)
+    record('owner removes photo; bytes no longer referenced',status==200 and count()==before and exists(path),http=status)
+    record('remaining photos renumbered with one cover',admin("select string_agg(sort_order::text||is_cover::text,',' order by sort_order) from public.property_images where property_id='"+listing+"';").startswith('0true'))
+    status,_=bulk_remove([path],A); record('other user cannot delete removed bytes',exists(path),http=status)
+    status,_=bulk_remove([path],B); record('owner deletes removed bytes',not exists(path),http=status)
+    status,cleanup=rpc('owner_pending_image_cleanup',{},B); record('cleanup forgets deleted bytes',status==200 and cleanup['paths']==[],http=status)
+    while count()>1:
+        last_id=admin("select id from public.property_images where property_id='"+listing+"' order by sort_order desc limit 1;")
+        status,gone=rpc('owner_remove_listing_image',{'p_id':listing,'p_image_id':last_id},B); assert status==200,status
+        bulk_remove([gone['path']],B)
+    only=admin("select id from public.property_images where property_id='"+listing+"';")
+    status,_=rpc('owner_remove_listing_image',{'p_id':listing,'p_image_id':only},B); deny_http('last photo cannot be removed',status)
+    for _ in range(4):
+        status,_=rpc('owner_begin_image_upload',{'p_id':listing,'p_mime':'image/png','p_size':len(PNG)},B); assert status==200,status
+    status,_=rpc('owner_begin_image_upload',{'p_id':listing,'p_mime':'image/png','p_size':len(PNG)},B); deny_http('sixth photo slot denied',status)
+
+def account_deletion():
+    """Fase 2: baja de cuenta solo sin anuncios; borra perfil y usuario."""
+    status,_=rpc('owner_delete_account',{},B); deny_http('account with listings cannot be deleted',status)
+    record('refused deletion keeps the user',admin("select count(*) from auth.users where id='"+B+"';")=='1')
+    status,_=rpc('owner_delete_account',{},None); deny_http('anonymous cannot delete accounts',status)
+    C=str(uuid.uuid4())
+    admin("insert into auth.users(id,email,raw_user_meta_data) values ('"+C+"','c@publication.example.invalid','{}');")
+    record('fresh user has profile',admin("select count(*) from public.profiles where id='"+C+"';")=='1')
+    status,_=rpc('owner_delete_account',{},C)
+    record('user without listings deletes own account',status==200 and admin("select count(*) from auth.users where id='"+C+"';")=='0'
+      and admin("select count(*) from public.profiles where id='"+C+"';")=='0',http=status)
 
 def race_test():
     content=PNG+b'\0'*(1024*1024-len(PNG)); plan,_=prepare(A,content=content)
