@@ -170,6 +170,9 @@ describe("migración de gestión", () => {
   it("el borrado de fotos exige eliminación solicitada y titularidad", () => {
     expect(sql).toMatch(/for delete to authenticated[\s\S]*p\.owner_id = \(select auth\.uid\(\)\)[\s\S]*p\.deletion_requested_at is not null/);
   });
+  it("se niega a eliminar si hay fotos fuera del bucket privado (no deja huérfanas)", () => {
+    expect(sql).toMatch(/storage_bucket is distinct from 'property-images-private'\) then\s+raise exception 'LEGACY_IMAGES'/);
+  });
   it("no da UPDATE directo sobre properties al dueño", () => {
     expect(sql).not.toMatch(/create policy[^;]*on public\.properties[^;]*for update/i);
     expect(sql).not.toMatch(/grant update/i);

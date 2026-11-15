@@ -132,6 +132,12 @@ declare r public.properties; paths jsonb;
 begin
   r := private.owned_listing(p_id);
   if r.status = 'draft' then raise exception 'LISTING_NOT_EDITABLE' using errcode = 'P0001'; end if;
+  -- Legacy public-bucket images cannot be removed by the owner: refuse instead of orphaning them
+  -- (support deletes those listings manually with the service role).
+  if exists (select 1 from public.property_images i where i.property_id = p_id
+             and i.storage_bucket is distinct from 'property-images-private') then
+    raise exception 'LEGACY_IMAGES' using errcode = 'P0001';
+  end if;
   update public.properties p set status = 'archived', owner_paused = false, is_reserved = false,
     deletion_requested_at = coalesce(p.deletion_requested_at, now())
   where p.id = p_id returning * into r;

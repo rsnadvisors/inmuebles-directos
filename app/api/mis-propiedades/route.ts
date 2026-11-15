@@ -16,6 +16,7 @@ const RPC_ERRORS: Record<string, [number, string]> = {
   AUTH_REQUIRED: [401, "Inicia sesión para gestionar tus anuncios."],
   IMAGES_REMAIN: [502, "No pudimos borrar todas las fotos. El anuncio ya está oculto; vuelve a intentar eliminarlo."],
   DELETION_NOT_REQUESTED: [409, "Vuelve a intentar la eliminación."],
+  LEGACY_IMAGES: [409, "Este anuncio antiguo no se puede eliminar desde aquí. Escríbenos y lo eliminamos por ti."],
 };
 function rpcFailure(error: { message?: string; code?: string } | null): Response {
   const known = error?.message && RPC_ERRORS[error.message];
