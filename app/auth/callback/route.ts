@@ -39,6 +39,10 @@ export async function GET(request: NextRequest) {
   const recoveryRequested = destination === "/restablecer-password";
   const errorUrl = new URL(recoveryRequested ? "/recuperar-password?error=recovery" : "/login?error=confirmation", origin);
   const code = request.nextUrl.searchParams.get("code");
+  // Email templates may use {{ .TokenHash }} instead of PKCE ?code= (works across browsers/devices).
+  const tokenHash = request.nextUrl.searchParams.get("token_hash");
+  const otpType = request.nextUrl.searchParams.get("type");
+  const OTP_TYPES = new Set(["recovery", "signup", "email", "invite", "magiclink", "email_change"]);
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   const context = {
@@ -47,7 +51,23 @@ export async function GET(request: NextRequest) {
     codePresent: Boolean(code), returnToPresent: request.nextUrl.searchParams.has("returnTo"),
     verifierCookiePresent: hasVerifierCookie(request, url),
   };
-  console.info(DIAGNOSTIC_PREFIX, { ...context, phase: "received" });
+  console.info(DIAGNOSTIC_PREFIX, { ...context, tokenHashPresent: Boolean(tokenHash), otpType, phase: "received" });
+  if (!code && tokenHash && otpType && OTP_TYPES.has(otpType) && /^[A-Za-z0-9_-]{8,256}$/.test(tokenHash) && url && key) {
+    try {
+      const client = createServerClient(url, key, { cookies: {
+        getAll: () => request.cookies.getAll(),
+        setAll: (items) => items.forEach(({ name, value, options }) => response.cookies.set(name, value, options)),
+      } });
+      const { error } = await client.auth.verifyOtp({ token_hash: tokenHash, type: otpType as "recovery" });
+      if (!error && otpType === "recovery") response.headers.set("location", new URL("/restablecer-password", origin).href);
+      console.info(DIAGNOSTIC_PREFIX, { ...context, phase: "result", flow: "token_hash",
+        exchangeResult: error ? "error" : "success", ...(error ? safeErrorCategory(error) : { errorName: "none", errorCode: "none" }) });
+      return error ? NextResponse.redirect(errorUrl) : response;
+    } catch (error) {
+      console.info(DIAGNOSTIC_PREFIX, { ...context, phase: "result", flow: "token_hash", exchangeResult: "threw", ...safeErrorCategory(error) });
+      return NextResponse.redirect(errorUrl);
+    }
+  }
   if (!code || !url || !key) {
     console.info(DIAGNOSTIC_PREFIX, { ...context, phase: "result", exchangeAttempted: false,
       exchangeResult: "not_attempted", failureClass: !code ? "missing_code" : "runtime_config",
