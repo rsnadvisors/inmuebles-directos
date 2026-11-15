@@ -5,6 +5,8 @@ import { getVerifiedPublicationUser } from "../../lib/auth-server";
 import { PRIVATE_PROPERTY_IMAGE_BUCKET, anonymousImageClient, loadPublishedPrivateImage } from "../../lib/property-images";
 import { isSamePublicationOrigin } from "../../lib/request-origin";
 import { BodyReadError, readBoundedBody, UPLOAD_BODY_TIMEOUT_MS } from "../../lib/bounded-body";
+import { verifyTurnstile } from "../../lib/turnstile-server";
+import { TURNSTILE_HEADER } from "../../lib/turnstile";
 
 export const runtime = "nodejs";
 const failure = (code: string, message: string, status: number) => Response.json({ ok: false, code, message }, { status });
@@ -40,6 +42,10 @@ export async function POST(request: Request): Promise<Response> {
   if (!/^multipart\/form-data\s*;/i.test(request.headers.get("content-type") ?? "")) return rejectBeforePreparation("INVALID_CONTENT_TYPE", "El formato de la solicitud no es válido.", 415);
   const length = request.headers.get("content-length");
   if (length && /^\d+$/.test(length) && Number(length) > MAX_REQUEST_BYTES) return rejectBeforePreparation("REQUEST_TOO_LARGE", "La solicitud supera el tamaño permitido.", 413);
+  // Anti-bot check before reading the (up to 25 MiB) body; the token travels in a header.
+  const captcha = await verifyTurnstile(request.headers.get(TURNSTILE_HEADER), request.headers.get("cf-connecting-ip"), "publish");
+  if (captcha === "FAIL") return rejectBeforePreparation("CAPTCHA_FAILED", "No pudimos completar la verificación de seguridad. Inténtalo de nuevo.", 403);
+  if (captcha === "UNAVAILABLE") return rejectBeforePreparation("CAPTCHA_UNAVAILABLE", "La verificación de seguridad no está disponible. Inténtalo en unos minutos.", 503);
   let input: ReturnType<typeof validatePublication>;
   try { input = validatePublication(await readForm(request)); }
   catch (error) {
@@ -82,6 +88,10 @@ export async function POST(request: Request): Promise<Response> {
     if (published.state !== "FINALIZED") throw new PublicationBoundaryError("RECONCILIATION_UNAVAILABLE");
     return await publishedResult(published);
   } catch (error) {
+    // The daily limit rejects the attempt's insert atomically: nothing was prepared.
+    if (!plan && error instanceof PublicationBoundaryError && error.code === "PUBLICATION_DAILY_LIMIT") {
+      return rejectBeforePreparation(error.code, "Alcanzaste el límite de 5 publicaciones en 24 horas. Inténtalo más tarde.", 429);
+    }
     if (plan) {
       try {
         const existing = await inspectPublication(supabase, user.id, requestId, plan.fingerprint);

@@ -76,6 +76,8 @@ async function call(client: Client, uid: string, requestId: string, rpc: string,
       "PUBLICATION_IN_PROGRESS", "PUBLICATION_ALREADY_FINALIZED", "PUBLICATION_REVISION_CONFLICT"];
     const code = known.find(code => result.error!.message === code);
     if (code) throw new PublicationBoundaryError(code, 409);
+    // Raised by the BEFORE INSERT trigger on new attempts only; the transaction rolls back entirely.
+    if (result.error.message === "PUBLICATION_DAILY_LIMIT") throw new PublicationBoundaryError("PUBLICATION_DAILY_LIMIT", 429);
     if (result.error.code === "PT404") throw new PublicationBoundaryError("PUBLICATION_NOT_FOUND", 404);
     throw new PublicationBoundaryError("RECONCILIATION_UNAVAILABLE");
   }

@@ -7,10 +7,13 @@ import { getBrowserClient } from "../lib/auth-client";
 import { safeReturnTo } from "../lib/safe-return";
 import { LEGAL_VERSION } from "../lib/legal";
 import PasswordInput from "./PasswordInput";
+import Turnstile, { type TurnstileHandle } from "./Turnstile";
+import { TURNSTILE_MISSING_MESSAGE } from "../lib/turnstile";
 
 export default function AuthForm({ mode, returnTo, passwordUpdated = false }: { mode: "login" | "register"; returnTo: string; passwordUpdated?: boolean }) {
   const router = useRouter();
   const pending = useRef(false);
+  const captcha = useRef<TurnstileHandle>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const destination = safeReturnTo(returnTo);
@@ -31,12 +34,14 @@ export default function AuthForm({ mode, returnTo, passwordUpdated = false }: { 
       if (password !== form.get("confirm_password")) { setMessage("Las contraseñas no coinciden."); return; }
       if (form.get("accept_legal") !== "on") { setMessage("Debes aceptar los Términos y condiciones y la Política de privacidad."); return; }
     }
+    const captchaToken = captcha.current?.token() ?? "";
+    if (!captchaToken) { setMessage(TURNSTILE_MISSING_MESSAGE); return; }
     pending.current = true;
     setBusy(true);
     setMessage("");
     try {
       if (mode === "login") {
-        const { error } = await client.auth.signInWithPassword({ email, password });
+        const { error } = await client.auth.signInWithPassword({ email, password, options: { captchaToken } });
         if (error) { setMessage("No pudimos iniciar sesión. Revisa el correo y la contraseña."); return; }
         router.replace(destination);
         router.refresh();
@@ -45,13 +50,15 @@ export default function AuthForm({ mode, returnTo, passwordUpdated = false }: { 
           // Evidence of informed consent (Ley 29733): accepted version and timestamp.
           data: { full_name: fullName, legal_version: LEGAL_VERSION, legal_accepted_at: new Date().toISOString() },
           emailRedirectTo: `${window.location.origin}/auth/callback?returnTo=${encodeURIComponent(destination)}`,
+          captchaToken,
         } });
         if (error) { setMessage("No pudimos crear la cuenta. Comprueba los datos e inténtalo otra vez."); return; }
         if (data.session) { router.replace(destination); router.refresh(); }
         else setMessage("Revisa tu correo para confirmar la cuenta y luego inicia sesión.");
       }
     } catch { setMessage("No pudimos conectar con el servicio. Inténtalo más tarde."); }
-    finally { pending.current = false; setBusy(false); }
+    // Turnstile tokens are single-use: always request a fresh one for the next attempt.
+    finally { captcha.current?.reset(); pending.current = false; setBusy(false); }
   }
 
   return <main className="auth-page"><Link href="/" className="geo-logo" aria-label="Inmuebles Directos Perú, inicio">Inmuebles<span> Directos</span><small>Perú</small></Link>
@@ -65,6 +72,7 @@ export default function AuthForm({ mode, returnTo, passwordUpdated = false }: { 
           <input type="checkbox" name="accept_legal" required disabled={busy} style={{ width: "auto", marginTop: 4 }} />
           <span>He leído y acepto los <Link href="/terminos" target="_blank">Términos y condiciones</Link> y la <Link href="/privacidad" target="_blank">Política de privacidad</Link>, y autorizo el tratamiento de mis datos personales conforme a la Ley N.º 29733.</span>
         </label>}
+        <Turnstile ref={captcha} action={mode === "login" ? "login" : "register"} />
         <button type="submit" disabled={busy}>{busy ? "Espera…" : mode === "login" ? "Entrar" : "Crear cuenta"}</button>
       </form>
       <p id="auth-feedback" role="status" className="auth-message">{message || (mode === "login" && passwordUpdated ? "Tu contraseña fue actualizada. Ya puedes iniciar sesión." : "")}</p>

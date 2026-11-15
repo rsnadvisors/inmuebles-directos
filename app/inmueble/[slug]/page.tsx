@@ -7,6 +7,7 @@ import PropertyGallery from "./PropertyGallery";
 import PropertyMap from "./PropertyMap";
 import SiteHeader from "../../components/SiteHeader";
 import PropertyContactActions from "../../components/PropertyContactActions";
+import { TITULAR } from "../../lib/legal";
 
 type PageProps = { params: Promise<{ slug: string }> };
 
@@ -55,6 +56,9 @@ export default async function PropertyPage({ params }: PageProps) {
     ["Pisos", property.floors, ""],
   ] as const;
   const shownAttributes = attributes.filter(([, value]) => value !== null);
+  const listingUrl = new URL(`/inmueble/${encodeURIComponent(property.slug || slug)}`, siteOrigin()).href;
+  const reportHref = `mailto:${TITULAR.correo}?subject=${encodeURIComponent("Denuncia de anuncio")}&body=${encodeURIComponent(
+    `Quiero denunciar este anuncio:\n${listingUrl}\n\nMotivo (falso, ya vendido, contenido indebido, datos de otra persona, etc.):\n`)}`;
 
   return <main className="property-full-page">
     <SiteHeader />
@@ -73,6 +77,7 @@ export default async function PropertyPage({ params }: PageProps) {
         {isMappable(property) && <section className="property-full-section"><h2>Ubicación</h2><PropertyMap property={property} /></section>}
         {date && <section className="property-full-section property-full-publication"><h2>Publicación</h2><p>Publicado el {date}</p></section>}
         <PropertyContactActions phone={property.contactPhone} title={property.title} status={property.status} />
+        <p className="property-report"><a href={reportHref} rel="nofollow">Denunciar este anuncio</a></p>
       </div>
     </article>
   </main>;

@@ -6,6 +6,8 @@ import { MAX_PRICE, validatePhotos, validatePublication, validCoordinates } from
 import SiteHeader from "../components/SiteHeader";
 import { publicationFingerprint } from "../lib/publication-attempt";
 import { PublicationRecoveryPanel, usePublicationRecovery } from "./PublicationRecovery";
+import Turnstile, { type TurnstileHandle } from "../components/Turnstile";
+import { TURNSTILE_HEADER, TURNSTILE_MISSING_MESSAGE } from "../lib/turnstile";
 
 const initialCoordinates = { latitude: "", longitude: "" };
 export default function PublishPage() {
@@ -19,6 +21,7 @@ export default function PublishPage() {
   const isSubmitting = recovery.busy;
   const locationVersion = useRef(0);
   const formRef = useRef<HTMLFormElement>(null);
+  const captcha = useRef<TurnstileHandle>(null);
 
   function resetPublicationForm() {
     locationVersion.current++;
@@ -77,6 +80,8 @@ export default function PublishPage() {
       let input: ReturnType<typeof validatePublication>;
       try { input = validatePublication(payload); }
       catch (error) { setStatus((error as Error).message); return; }
+      const captchaToken = captcha.current?.token() ?? "";
+      if (!captchaToken) { setStatus(TURNSTILE_MISSING_MESSAGE); return; }
       locationVersion.current++;
       setPublishedSlug(null);
       setStatus("Publicando…");
@@ -85,7 +90,7 @@ export default function PublishPage() {
       if (!attempt) { if (recovery.isCurrent(operation)) setStatus(""); return; }
       if (!recovery.markPublicationSent(operation)) return;
       const response = await fetch("/api/publicar", { method: "POST", body: payload,
-        headers: { "X-Publication-Request-Id": attempt.id } });
+        headers: { "X-Publication-Request-Id": attempt.id, [TURNSTILE_HEADER]: captchaToken } });
       const result = await response.json();
       if (!recovery.isCurrent(operation)) return;
       if (recovery.releaseRejectedPublication(operation, response.status, result)) {
@@ -107,7 +112,7 @@ export default function PublishPage() {
         setStatus(result.imageDelivery === "unconfirmed"
           ? "Propiedad publicada. No pudimos confirmar la imagen; revísala en Mis propiedades. No vuelvas a publicarla."
           : "Propiedad publicada. Puedes verla en Mis propiedades.");
-      } else if (result.ok === false && ["VALIDATION_ERROR", "INVALID_REQUEST", "INVALID_CONTENT_TYPE", "INVALID_ORIGIN", "REQUEST_TOO_LARGE", "PUBLICATION_FAILED"].includes(result.code)) {
+      } else if (result.ok === false && ["CAPTCHA_FAILED", "CAPTCHA_UNAVAILABLE", "PUBLICATION_DAILY_LIMIT", "VALIDATION_ERROR", "INVALID_REQUEST", "INVALID_CONTENT_TYPE", "INVALID_ORIGIN", "REQUEST_TOO_LARGE", "PUBLICATION_FAILED"].includes(result.code)) {
         recovery.publicationUncertain(operation);
         setStatus(typeof result.message === "string" ? result.message : "No se pudo completar la publicación.");
       } else {
@@ -116,6 +121,7 @@ export default function PublishPage() {
     } catch {
       if (recovery.isCurrent(operation)) { recovery.publicationUncertain(operation); setStatus(""); }
     } finally {
+      captcha.current?.reset(); // single-use token
       recovery.finishPublication(operation);
     }
   }
@@ -144,6 +150,7 @@ export default function PublishPage() {
         <small>{coordinatesConfirmed ? "Coordenadas confirmadas." : "Coordenadas sin confirmar. Obtén tu ubicación o confirma manualmente la ubicación en Perú."}</small>
       </fieldset>
       <label>Fotos de la propiedad<input type="file" accept="image/jpeg,image/png,image/webp" multiple required disabled={isSubmitting} onChange={onFiles} /><small>Obligatorio: 1 a 5 fotos · JPG, PNG o WebP · máximo 5 MiB por foto.</small>{files.length > 0 && <small>{files.length} foto(s) seleccionada(s).</small>}</label>
+      <Turnstile ref={captcha} action="publish" />
       <button className="publish-submit" type="submit" disabled={!recovery.canSubmit}>{isSubmitting ? "Publicando…" : "Publicar propiedad"}</button>
       {status && <p className="form-status" role="status">{status}</p>}
       {status.startsWith("Propiedad publicada") && <div className="publish-success-links">{publishedSlug && <Link href={`/inmueble/${encodeURIComponent(publishedSlug)}`}>Ver ficha completa</Link>}<Link href="/mis-propiedades">Ver Mis propiedades</Link></div>}
