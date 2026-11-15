@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import { siteOrigin } from "../../lib/auth-origin";
 import { formatPrice, isMappable, type Listing } from "../../lib/inventory";
 import { getPublishedListing } from "../../lib/property";
 import PropertyGallery from "./PropertyGallery";
@@ -35,7 +36,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
       url: canonical,
       title: property.title,
       description,
-      ...(property.imageItems[0] ? { images: [{ url: new URL(property.imageItems[0].url, "https://inmueblesdirectos.com").href, alt: property.imageItems[0].altText || property.title }] } : {}),
+      ...(property.imageItems[0] ? { images: [{ url: new URL(property.imageItems[0].url, siteOrigin()).href, alt: property.imageItems[0].altText || property.title }] } : {}),
     },
   };
 }
