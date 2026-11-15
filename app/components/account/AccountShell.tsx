@@ -1,5 +1,6 @@
 import Link from "next/link";
 import SignOutButton from "../SignOutButton";
+import AccountMenu from "./AccountMenu";
 import "./account.css";
 
 type Section = "resumen" | "propiedades";
@@ -50,7 +51,7 @@ export default function AccountShell({ active, name, email, title, subtitle, act
 
       <header className="acct-topbar">
         <Link className="acct-brand" href="/" aria-label="Inmuebles Directos Perú, inicio">Inmuebles <span>Directos</span></Link>
-        <span className="acct-avatar" aria-hidden="true">{initials(name)}</span>
+        <AccountMenu name={name} email={email} initials={initials(name)} />
       </header>
 
       <main className="acct-main">
