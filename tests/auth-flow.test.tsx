@@ -31,7 +31,7 @@ describe("Supabase Auth UX", () => {
     fireEvent.change(screen.getByLabelText("Correo electrónico"), { target: { value: " user@example.test " } });
     fireEvent.change(screen.getByLabelText("Contraseña"), { target: { value: "synthetic-password" } });
     fireEvent.submit(screen.getByLabelText("Correo electrónico").closest("form")!);
-    await waitFor(() => expect(stub.signIn).toHaveBeenCalledWith({ email: "user@example.test", password: "synthetic-password" }));
+    await waitFor(() => expect(stub.signIn).toHaveBeenCalledWith({ email: "user@example.test", password: "synthetic-password", options: { captchaToken: expect.stringMatching(/^test-turnstile-/) } }));
     expect(stub.replace).toHaveBeenCalledWith("/publicar");
   });
   it("rejects mismatched registration passwords before any Auth call", () => {

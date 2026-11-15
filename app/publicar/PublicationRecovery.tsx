@@ -122,7 +122,10 @@ function useController(userId: string, canPublish: boolean) {
     const body = result as Record<string, unknown>;
     const expectedStatus = body.code === "INVALID_CONTENT_TYPE" ? 415
       : body.code === "REQUEST_TOO_LARGE" ? 413
-      : body.code === "VALIDATION_ERROR" || body.code === "INVALID_REQUEST" ? 400 : null;
+      : body.code === "VALIDATION_ERROR" || body.code === "INVALID_REQUEST" ? 400
+      : body.code === "CAPTCHA_FAILED" ? 403
+      : body.code === "CAPTCHA_UNAVAILABLE" ? 503
+      : body.code === "PUBLICATION_DAILY_LIMIT" ? 429 : null;
     if (expectedStatus === null || status !== expectedStatus || body.ok !== false || body.preparation !== "NOT_STARTED"
       || body.requestId !== op.reference.id || body.subject !== op.userId) return false;
     try {

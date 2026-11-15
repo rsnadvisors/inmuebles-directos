@@ -17,10 +17,23 @@ beforeEach(() => {
   vi.stubGlobal("fetch", vi.fn(noNetwork));
   vi.stubGlobal("WebSocket", class { constructor() { noNetwork(); } });
   if (typeof XMLHttpRequest !== "undefined") vi.spyOn(XMLHttpRequest.prototype, "open").mockImplementation(noNetwork);
+  // Synthetic Turnstile: never loads the remote script; issues a fresh fake token per render/reset.
+  if (typeof window !== "undefined") {
+    let serial = 0;
+    const widgets = new Map<string, (token: string) => void>();
+    (window as unknown as { turnstile?: unknown }).turnstile = {
+      render: vi.fn((_element: HTMLElement, options: { callback: (token: string) => void }) => {
+        const id = `w${++serial}`; widgets.set(id, options.callback); options.callback(`test-turnstile-${serial}`); return id;
+      }),
+      reset: vi.fn((id: string) => widgets.get(id)?.(`test-turnstile-${++serial}`)),
+      remove: vi.fn((id: string) => { widgets.delete(id); }),
+    };
+  }
 });
 
 afterEach(() => {
   cleanup();
+  if (typeof window !== "undefined") delete (window as unknown as { turnstile?: unknown }).turnstile;
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });

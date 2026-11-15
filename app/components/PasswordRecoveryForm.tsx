@@ -6,12 +6,15 @@ import { FormEvent, useRef, useState } from "react";
 import { getBrowserClient } from "../lib/auth-client";
 import { recoveryRedirect } from "../lib/auth-origin";
 import PasswordInput from "./PasswordInput";
+import Turnstile, { type TurnstileHandle } from "./Turnstile";
+import { TURNSTILE_MISSING_MESSAGE } from "../lib/turnstile";
 
 export const RECOVERY_MESSAGE = "Si existe una cuenta asociada a ese correo, recibirás instrucciones para restablecer tu contraseña. Si no llegan, espera unos minutos antes de solicitar otro enlace.";
 
 export default function PasswordRecoveryForm({ mode, userId }: { mode: "request" | "reset"; userId?: string }) {
   const router = useRouter();
   const pending = useRef(false);
+  const captcha = useRef<TurnstileHandle>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [finished, setFinished] = useState(false);
@@ -38,9 +41,17 @@ export default function PasswordRecoveryForm({ mode, userId }: { mode: "request"
     let credentialUpdated = passwordUpdated;
     try {
       if (mode === "request") {
+        const captchaToken = captcha.current?.token() ?? "";
+        if (!captchaToken) { setMessage(TURNSTILE_MISSING_MESSAGE); return; }
         // Provider existence/delivery errors deliberately share the same neutral response.
-        try { await client.auth.resetPasswordForEmail(email, { redirectTo: recoveryRedirect(window.location.origin) }); }
-        catch { /* Do not serialize provider errors or reveal account existence. */ }
+        // Only a CAPTCHA rejection (independent of the account) is reported, so the user can retry.
+        let captchaRejected = false;
+        try {
+          const result = await client.auth.resetPasswordForEmail(email, { redirectTo: recoveryRedirect(window.location.origin), captchaToken });
+          captchaRejected = result?.error?.code === "captcha_failed";
+        } catch { /* Do not serialize provider errors or reveal account existence. */ }
+        finally { captcha.current?.reset(); }
+        if (captchaRejected) { setMessage("No pudimos completar la verificación de seguridad. Inténtalo de nuevo."); return; }
         formElement.reset();
         setMessage(RECOVERY_MESSAGE);
         setFinished(true);
@@ -83,6 +94,7 @@ export default function PasswordRecoveryForm({ mode, userId }: { mode: "request"
             <PasswordInput label="Nueva contraseña" name="password" autoComplete="new-password" minLength={8} disabled={busy || finished} describedBy="recovery-feedback" />
             <PasswordInput label="Confirmar nueva contraseña" name="confirm_password" autoComplete="new-password" disabled={busy || finished} describedBy="recovery-feedback" />
           </>}
+          {mode === "request" && !finished && <Turnstile ref={captcha} action="recovery" />}
           <button type="submit" disabled={busy || finished}>{busy ? mode === "request" ? "Enviando…" : "Actualizando…" : mode === "request" ? "Enviar enlace" : passwordUpdated ? "Cerrar esta sesión" : "Actualizar contraseña"}</button>
         </form>
         <p id="recovery-feedback" role="status" className="auth-message">{message}</p>

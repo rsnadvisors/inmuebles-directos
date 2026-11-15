@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { POST } from "../app/api/publicar/route";
 import { MAX_PHOTO_BYTES, MAX_REQUEST_BYTES } from "../app/lib/publication";
 const mock = vi.hoisted(() => ({ create: vi.fn(), prepare: vi.fn(), rpc: vi.fn(), upload: vi.fn(), delivery: vi.fn(),
@@ -57,6 +57,58 @@ beforeEach(() => {
   mock.create.mockReset().mockReturnValue({
     from: () => { throw new Error("Direct application DML forbidden"); },
     storage: { from: mock.storageFrom }, rpc: mock.rpc,
+  });
+});
+describe("antispam: Turnstile and daily limit", () => {
+  const requestId = "33333333-3333-4333-8333-333333333333";
+  const subject = "11111111-1111-4111-8111-111111111111";
+  afterEach(() => { vi.unstubAllEnvs(); });
+  const siteverify = (body: unknown) => vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify(body), { status: 200 }));
+  it("rejects a missing token before reading the body, with no RPC and no upload", async () => {
+    vi.stubEnv("TURNSTILE_SECRET_KEY", "synthetic-secret");
+    const response = await POST(request(form(), { "x-publication-request-id": requestId }));
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({ code: "CAPTCHA_FAILED", preparation: "NOT_STARTED", requestId, subject });
+    expect(fetch).not.toHaveBeenCalled(); expect(mock.calls).toEqual([]);
+  });
+  it.each([[{ success: false }], [{ success: true, action: "login" }]])("rejects an invalid or foreign-action token %j", async body => {
+    vi.stubEnv("TURNSTILE_SECRET_KEY", "synthetic-secret"); siteverify(body);
+    const response = await POST(request(form(), { "x-publication-request-id": requestId, "x-turnstile-token": "tok", "cf-connecting-ip": "203.0.113.9" }));
+    expect(response.status).toBe(403); expect((await response.json()).code).toBe("CAPTCHA_FAILED");
+    const sent = vi.mocked(fetch).mock.calls[0];
+    expect(String(sent[0])).toBe("https://challenges.cloudflare.com/turnstile/v0/siteverify");
+    const params = sent[1]!.body as URLSearchParams;
+    expect(params.get("response")).toBe("tok"); expect(params.get("remoteip")).toBe("203.0.113.9");
+    expect(mock.calls).toEqual([]);
+  });
+  it("fails closed when siteverify is unreachable", async () => {
+    vi.stubEnv("TURNSTILE_SECRET_KEY", "synthetic-secret");
+    const response = await POST(request(form(), { "x-publication-request-id": requestId, "x-turnstile-token": "tok" }));
+    expect(response.status).toBe(503); expect((await response.json()).code).toBe("CAPTCHA_UNAVAILABLE"); expect(mock.calls).toEqual([]);
+  });
+  it("fails closed in production when the secret is not configured", async () => {
+    const { verifyTurnstile } = await import("../app/lib/turnstile-server");
+    expect(await verifyTurnstile("tok", null, "publish")).toBe("PASS"); // tests/dev only
+    vi.stubEnv("NODE_ENV", "production");
+    expect(await verifyTurnstile("tok", null, "publish")).toBe("UNAVAILABLE");
+    expect(fetch).not.toHaveBeenCalled();
+  });
+  it("publishes with a valid publish token", async () => {
+    vi.stubEnv("TURNSTILE_SECRET_KEY", "synthetic-secret"); siteverify({ success: true, action: "publish" });
+    const response = await POST(request(form(), { "x-publication-request-id": requestId, "x-turnstile-token": "tok" }));
+    expect(response.status).toBe(200); expect((await response.json()).status).toBe("published");
+  });
+  it("maps the database daily limit to a correlated 429 without uploads", async () => {
+    const original = mock.rpc.getMockImplementation()!;
+    mock.rpc.mockImplementation(async (rpc: string, proof: { p_envelope: string }) => {
+      if (rpc !== "prepare_publication_attempt") return original(rpc, proof);
+      mock.calls.push("prepare");
+      return { data: null, error: { message: "PUBLICATION_DAILY_LIMIT", code: "P0001" } };
+    });
+    const response = await POST(request(form(), { "x-publication-request-id": requestId }));
+    expect(response.status).toBe(429);
+    expect(await response.json()).toMatchObject({ code: "PUBLICATION_DAILY_LIMIT", preparation: "NOT_STARTED", requestId, subject });
+    expect(mock.calls).toEqual(["prepare"]);
   });
 });
 describe("publication contact phone", () => {

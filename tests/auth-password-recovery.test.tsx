@@ -86,7 +86,7 @@ describe("recovery request isolation and enumeration", () => {
     vi.stubEnv("NODE_ENV", "production");
     render(<PasswordRecoveryForm mode="request" />);
     submitRequest();
-    await waitFor(() => expect(stub.request).toHaveBeenCalledWith("qa@example.test", { redirectTo: "https://inmueblesdirectos.com/auth/callback?returnTo=%2Frestablecer-password" }));
+    await waitFor(() => expect(stub.request).toHaveBeenCalledWith("qa@example.test", { redirectTo: "https://inmueblesdirectos.com/auth/callback?returnTo=%2Frestablecer-password", captchaToken: expect.stringMatching(/^test-turnstile-/) }));
     expect(screen.getByRole("status").textContent).toBe(RECOVERY_MESSAGE);
     expect((screen.getByRole("button", { name: "Enviar enlace" }) as HTMLButtonElement).disabled).toBe(true);
     vi.unstubAllEnvs();
