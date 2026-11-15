@@ -68,6 +68,10 @@ def apply_contract(succeeds=True):
     if not target.exists():
         with target.open('xb') as f: f.write(CONTRACT.read_bytes())
     assert target.read_bytes()==CONTRACT.read_bytes(), 'Contract identity changed'
+    # Migrations newer than Contract must follow it (the CLI refuses out-of-order versions).
+    for later in sorted((ROOT/'supabase/migrations').glob('*.sql')):
+        if later.name>CONTRACT.name and not (WORK/'supabase/migrations'/later.name).exists():
+            (WORK/'supabase/migrations'/later.name).write_text(later.read_text())
     code,output=migrate()
     assert (code==0)==succeeds, 'Unexpected Contract migration outcome: '+output[-1200:]
     return output
@@ -126,7 +130,7 @@ def main():
     (work/'supabase/config.toml').write_text((ROOT/'supabase/config.toml').read_text())
     (migration_dir/'20260909040437_baseline_RECONSTRUCTION_TEST_ONLY.sql').write_text((ROOT/'tests/security/fixtures/admin_rbac_baseline.sql').read_text())
     for m in migrations:
-        if m.name.endswith('_publication_boundary_contract.sql'): continue
+        if m.name.endswith('_publication_boundary_contract.sql') or m.name>CONTRACT.name: continue
         (migration_dir/m.name).write_text(m.read_text())
         hashes.append({'file':m.name,'sha256':hashlib.sha256(m.read_bytes()).hexdigest()})
     code,output=migrate()

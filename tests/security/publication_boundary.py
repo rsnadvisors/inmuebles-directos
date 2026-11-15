@@ -5,7 +5,7 @@ The harness refuses remote URLs, linked projects, non-loopback service bindings,
 an occupied fresh database, and the absence of its synthetic-only test key.
 No credential, JWT, proof, application row or binary is printed in evidence.
 """
-import base64, concurrent.futures, hashlib, hmac, json, os, pathlib, subprocess, threading, time, urllib.error, urllib.request, uuid
+import base64, concurrent.futures, hashlib, hmac, json, os, pathlib, subprocess, sys, threading, time, urllib.error, urllib.request, uuid
 import http.client as http_client
 import publication_boundary_lab as lab
 
@@ -310,6 +310,14 @@ def main():
     replay=expect_rpc('prepare_publication_attempt',jobs[next(i for i,r in enumerate(results) if r[0]==200)][2]); record('deleted parent replay does not recreate',not replay['parentValid'] and not any(s['metadataValid'] for s in replay['slots']))
     status,_=finalize(replay); deny_http('deleted parent cannot finalize',status)
     cancel(replay)
+    # Antispam: at most five new attempts per owner in a rolling 24 h window (cancelled ones count).
+    recent=admin("select count(*) from private.publication_attempts where owner_id='"+A+"' and created_at>now()-interval '24 hours';")
+    record('owner reached five attempts in 24 h',int(recent)>=5)
+    status,data=rpc('prepare_publication_attempt',make(A)[2])
+    record('sixth new attempt in 24 h denied',400<=status<500 and 'PUBLICATION_DAILY_LIMIT' in json.dumps(data),http=status)
+    record('denied attempt left no rows',admin("select count(*) from private.publication_attempts where owner_id='"+A+"' and created_at>now()-interval '24 hours';")==recent)
+    other,_=prepare(B); record('daily limit is per owner',other['state']=='ACTIVE'); cancel(other,B)
+    admin("update private.publication_attempts set created_at=created_at-interval '25 hours' where owner_id='"+A+"';")
     # Actual in-flight transfer: pause once a synthetic backend file proves admission.
     race_test()
     # ACL / private-key isolation and immutable trigger policies.
