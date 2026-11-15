@@ -21,7 +21,7 @@ A='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'; B='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb
 def record(name,ok,**evidence):
     ROWS.append({'check':name,'result':'PASS' if ok else 'FAIL',**evidence})
     (WORK/'security-results.json').write_text(json.dumps(ROWS,indent=2))
-    assert ok,name
+    assert ok,name+(' '+json.dumps(evidence,default=str)[:400] if evidence else '')
 def admin(s): return lab.sql(s).strip()
 def enc(b): return base64.urlsafe_b64encode(b).rstrip(b'=').decode()
 ST=lab.config(lab.STORAGE); RT=lab.config(lab.REST)
@@ -386,7 +386,7 @@ def owner_photos():
     status,_=rpc('owner_begin_image_upload',{'p_id':listing,'p_mime':'image/gif','p_size':len(PNG)},B); deny_http('photo type outside allow-list rejected',status)
     status,_=http('POST','object/property-images-private/'+B+'/'+listing+'/'+str(uuid.uuid4())+'.png',B,PNG,'image/png',True)
     deny_http('unreserved photo path upload denied',status)
-    status,res=rpc('owner_begin_image_upload',{'p_id':listing,'p_mime':'image/png','p_size':len(PNG)},B); record('owner reserves photo upload',status==200,http=status)
+    status,res=rpc('owner_begin_image_upload',{'p_id':listing,'p_mime':'image/png','p_size':len(PNG)},B); record('owner reserves photo upload',status==200,http=status,body=res)
     path=res['path']; record('reserved path is inside owner and listing folder',path.startswith(B+'/'+listing+'/') and path.endswith('.png'))
     status,_=http('POST','object/property-images-private/'+path,A,PNG,'image/png',True); deny_http('other user cannot upload to reserved path',status)
     status,_=http('POST','object/property-images-private/'+path,B,PNG,'image/jpeg',True); deny_http('reserved path refuses another content type',status)
