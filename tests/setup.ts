@@ -22,7 +22,11 @@ beforeEach(() => {
     let serial = 0;
     const widgets = new Map<string, (token: string) => void>();
     (window as unknown as { turnstile?: unknown }).turnstile = {
-      render: vi.fn((_element: HTMLElement, options: { callback: (token: string) => void }) => {
+      render: vi.fn((element: HTMLElement, options: { callback: (token: string) => void; "response-field"?: boolean }) => {
+        // Mirrors the real widget: it injects a hidden response input unless response-field is false.
+        if (options["response-field"] !== false) {
+          const input = document.createElement("input"); input.type = "hidden"; input.name = "cf-turnstile-response"; element.appendChild(input);
+        }
         const id = `w${++serial}`; widgets.set(id, options.callback); options.callback(`test-turnstile-${serial}`); return id;
       }),
       reset: vi.fn((id: string) => widgets.get(id)?.(`test-turnstile-${++serial}`)),

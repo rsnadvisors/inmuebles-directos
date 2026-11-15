@@ -49,6 +49,9 @@ const Turnstile = forwardRef<TurnstileHandle, { action: TurnstileAction }>(funct
       if (!alive || !box.current || widgetId.current) return;
       widgetId.current = api.render(box.current, {
         sitekey: TURNSTILE_SITE_KEY, action, language: "es", size: "flexible",
+        // No hidden <input name="cf-turnstile-response">: the token travels explicitly, and the
+        // publication form rejects unknown fields.
+        "response-field": false,
         callback: (value: string) => { token.current = value; setFailed(false); },
         "expired-callback": () => { token.current = ""; },
         "error-callback": () => { token.current = ""; },
