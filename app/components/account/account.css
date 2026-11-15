@@ -150,3 +150,4 @@
 .acct-danger-zone{display:block}.acct-danger-zone ul{margin:8px 0 12px;padding-left:20px}.acct-delete-form{display:grid;gap:10px;max-width:420px;margin-top:16px}
 .acct-delete-form label{display:grid;gap:6px;font-size:14px}.acct-delete-form input{padding:10px 12px;border:1px solid var(--line);border-radius:10px;font:inherit}
 .acct-delete-form button:disabled{opacity:.5;cursor:default}
+.acct-stats{font-size:13px;color:var(--brand-ink,#073d37);font-weight:600}

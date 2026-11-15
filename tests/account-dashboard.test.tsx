@@ -18,7 +18,8 @@ const ROWS = [
 ];
 
 function client() {
-  return { from: (table: string) => ({ select: () => ({ eq: () => table === "profiles"
+  return { rpc: async () => ({ data: { p1: { view: 12, call: 2, whatsapp: 1 } }, error: null }),
+    from: (table: string) => ({ select: () => ({ eq: () => table === "profiles"
     ? { maybeSingle: async () => ({ data: { full_name: "Ricardo Sancarranco" } }) }
     : { order: async () => stubs.rows() } }) }) };
 }
@@ -47,6 +48,8 @@ describe("Mis propiedades (panel)", () => {
     expect(srcs).toEqual(["/api/property-images/11111111-1111-4111-8111-111111111111",
       "/api/property-images/22222222-2222-4222-8222-222222222222/preview"]);
     expect(screen.getByText("Terreno en Venta · Castilla, Piura")).toBeTruthy();
+    expect(screen.getByText("Últimos 30 días: 12 visitas · 2 llamadas · 1 clic en WhatsApp")).toBeTruthy();
+    expect(screen.getByText(/Vence el/)).toBeTruthy();
   });
 
   it("filtra por pestaña y explica una pestaña vacía", async () => {

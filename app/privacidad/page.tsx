@@ -90,7 +90,8 @@ export default function Privacidad() {
       <h2>10. Cookies</h2>
       <p>
         Usamos únicamente cookies técnicas necesarias para iniciar y mantener tu sesión de forma segura. No usamos
-        cookies de publicidad ni de seguimiento de terceros.
+        cookies de publicidad ni de seguimiento de terceros. Para mostrar a cada anunciante cuántas visitas y contactos recibe su anuncio, contamos
+        de forma agregada (por día y anuncio) las visitas y los clics en «Llamar» y «WhatsApp», sin cookies, sin identificarte y sin guardar tu dirección IP.
       </p>
 
       <h2>11. Cambios</h2>

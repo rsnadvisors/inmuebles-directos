@@ -8,6 +8,7 @@ import { getBrowserClient } from "./lib/auth-client";
 import { Listing, compactLocation, comparisonAttributes, filterAndSortListings, formatPrice, isMappable, normalizeInventory, previewLocation, primaryImage, propertyIcon, propertyTypes } from "./lib/inventory";
 import SiteHeader from "./components/SiteHeader";
 import PropertyContactActions from "./components/PropertyContactActions";
+import ListingViewBeacon from "./components/ListingViewBeacon";
 
 const PiuraMap = dynamic(() => import("./PiuraMap"), { ssr: false });
 
@@ -140,7 +141,7 @@ export default function Home() {
         {selected.description && <p className="drawer-description">{selected.description}</p>}
         <div className="drawer-location"><span aria-hidden="true">⌖</span> {previewLocation(selected)}</div><ListingAttributes listing={selected} context="drawer" />
         <div className="drawer-actions">{selected.slug && <Link className="drawer-primary-action" href={`/inmueble/${selected.slug}`}>Ficha completa</Link>}{selected.coords && <button className="drawer-secondary-action" type="button" onClick={() => closeDrawer(true)}>Ver mapa</button>}</div>
-        <PropertyContactActions phone={selected.contactPhone} title={selected.title} status={selected.status} />
+        <PropertyContactActions phone={selected.contactPhone} title={selected.title} status={selected.status} listingId={selected.id} /><ListingViewBeacon id={selected.id} />
       </div>}
       {selected && galleryOpen && <div className="gallery-modal" role="dialog" aria-modal="true" aria-label={`Galería de ${selected.title}`}><button type="button" className="gallery-modal-close" onClick={() => setGalleryOpen(false)} aria-label="Cerrar galería">×</button><button type="button" className="gallery-prev" onClick={() => setGalleryIndex((galleryIndex - 1 + selected.images.length) % selected.images.length)} aria-label="Imagen anterior">‹</button><img src={selected.images[galleryIndex]} alt={selected.title} /><button type="button" className="gallery-next" onClick={() => setGalleryIndex((galleryIndex + 1) % selected.images.length)} aria-label="Imagen siguiente">›</button><span>{galleryIndex + 1} / {selected.images.length}</span></div>}
     </main>
