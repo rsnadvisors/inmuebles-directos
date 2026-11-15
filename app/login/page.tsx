@@ -7,6 +7,6 @@ export default async function Login({ searchParams }: { searchParams: Promise<{ 
   const params = await searchParams;
   const destination = safeReturnTo(params.returnTo);
   const { user } = await getVerifiedUser();
-  if (user) redirect(destination);
+  if (user && !user.is_anonymous) redirect(destination);
   return <AuthForm mode="login" returnTo={destination} passwordUpdated={params.status === "password-updated"} />;
 }

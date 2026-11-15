@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { safeReturnTo } from "../../lib/safe-return";
-import { authOrigin } from "../../lib/auth-origin";
+import { authRequestOrigin } from "../../lib/auth-origin";
 
 const DIAGNOSTIC_PREFIX = "[AUTH_CALLBACK_DIAG]";
 const SAFE_ERROR_NAMES = new Set([
@@ -34,7 +34,7 @@ function hasVerifierCookie(request: NextRequest, url: string | undefined) {
 
 export async function GET(request: NextRequest) {
   const destination = safeReturnTo(request.nextUrl.searchParams.get("returnTo"));
-  const origin = authOrigin(request.nextUrl.origin);
+  const origin = authRequestOrigin(request);
   const response = NextResponse.redirect(new URL(destination, origin));
   const recoveryRequested = destination === "/restablecer-password";
   const errorUrl = new URL(recoveryRequested ? "/recuperar-password?error=recovery" : "/login?error=confirmation", origin);

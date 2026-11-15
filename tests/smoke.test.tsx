@@ -4,6 +4,7 @@ import Home from "../app/page";
 import PublishPage from "../app/publicar/page";
 import PublicationRecovery from "../app/publicar/PublicationRecovery";
 import RoutePage from "../app/[...slug]/page";
+import NotFound from "../app/not-found";
 
 vi.mock("../app/lib/auth-client", async () => {
   const { supabase } = await import("./mocks/supabase");
@@ -136,9 +137,10 @@ describe("baseline smoke tests (offline)", () => {
     expect(screen.getByText("1 foto(s) seleccionada(s).")).toBeTruthy();
   });
 
-  it("resolves the current catch-all route without asserting placeholder content", async () => {
-    render(await RoutePage({ params: Promise.resolve({ slug: ["fixture-house"] }) }));
-    expect(screen.getByRole("main")).toBeTruthy();
+  it("answers unknown routes with a real 404 instead of a placeholder page", async () => {
+    await expect(RoutePage({ params: Promise.resolve({ slug: ["fixture-house"] }) })).rejects.toThrow();
+    render(NotFound());
+    expect(screen.getByRole("heading", { name: "Página no encontrada" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Volver al inicio" }).getAttribute("href")).toBe("/");
   });
 

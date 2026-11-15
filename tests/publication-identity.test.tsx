@@ -166,7 +166,13 @@ describe("publication layout identity boundary", () => {
     provider.getUser.mockResolvedValue({ data: { user: null }, error: null });
     await expect(PublishLayout({ children: "publication form" })).rejects.toThrow("REDIRECT:/login?returnTo=/publicar");
   });
-  it.each(deniedIdentities.filter(({ user }) => !!user.id))("offers only recovery for $label without a login redirect loop", async ({ user }) => {
+  it("redirects an Auth anonymous session to login without exposing publication or recovery", async () => {
+    provider.getUser.mockResolvedValue({ data: { user: { ...registeredUser, is_anonymous: true } }, error: null });
+    await expect(PublishLayout({ children: "publication form" })).rejects.toThrow("REDIRECT:/login?returnTo=/publicar");
+    expect(provider.rpc).not.toHaveBeenCalled();
+    expect(provider.storageFrom).not.toHaveBeenCalled();
+  });
+  it.each(deniedIdentities.filter(({ user }) => !!user.id && user.is_anonymous !== true))("offers only recovery for $label without a login redirect loop", async ({ user }) => {
     provider.getUser.mockResolvedValue({ data: { user }, error: null });
     const result = await PublishLayout({ children: "publication form" });
     expect(result).toMatchObject({ type: PublicationRecovery, props: { userId: user.id, canPublish: false } });

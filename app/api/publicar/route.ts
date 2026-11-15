@@ -1,13 +1,13 @@
 import { MAX_REQUEST_BYTES, PublicationValidationError, validatePublication } from "../../lib/publication";
-import { siteOrigin } from "../../lib/auth-origin";
 import { preparePublication, inspectPublication, finalizePublication, PublicationBoundaryError,
   PUBLICATION_REQUEST_ID, type PublicationPlan } from "../../lib/publication-boundary-server";
 import { getVerifiedPublicationUser } from "../../lib/auth-server";
 import { PRIVATE_PROPERTY_IMAGE_BUCKET, anonymousImageClient, loadPublishedPrivateImage } from "../../lib/property-images";
+import { isSamePublicationOrigin } from "../../lib/request-origin";
+import { BodyReadError, readBoundedBody, UPLOAD_BODY_TIMEOUT_MS } from "../../lib/bounded-body";
 
 export const runtime = "nodejs";
 const failure = (code: string, message: string, status: number) => Response.json({ ok: false, code, message }, { status });
-class BodyTooLarge extends Error {}
 
 async function deliveryAvailable(imageId: string | null): Promise<boolean> {
   const client = anonymousImageClient();
@@ -18,29 +18,12 @@ async function deliveryAvailable(imageId: string | null): Promise<boolean> {
 
 // Count actual bytes before multipart parsing. This is not an ingress/concurrency limit.
 async function readForm(request: Request): Promise<FormData> {
-  const reader = request.body?.getReader();
-  if (!reader) throw new Error("Missing body");
-  const chunks: Uint8Array<ArrayBuffer>[] = [];
-  let size = 0;
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      size += value.byteLength;
-      if (size > MAX_REQUEST_BYTES) {
-        await reader.cancel();
-        throw new BodyTooLarge();
-      }
-      chunks.push(new Uint8Array(value));
-    }
-  } finally { reader.releaseLock(); }
-  return new Response(new Blob(chunks), { headers: { "content-type": request.headers.get("content-type")! } }).formData();
+  const body = await readBoundedBody(request, MAX_REQUEST_BYTES, UPLOAD_BODY_TIMEOUT_MS);
+  return new Response(body, { headers: { "content-type": request.headers.get("content-type")! } }).formData();
 }
 
 export async function POST(request: Request): Promise<Response> {
-  const origin = request.headers.get("origin");
-  const expectedOrigin = process.env.NODE_ENV === "production" ? siteOrigin() : new URL(request.url).origin;
-  if (origin !== expectedOrigin || request.headers.get("sec-fetch-site") === "cross-site") return failure("INVALID_ORIGIN", "La solicitud debe iniciarse desde este sitio.", 403);
+  if (!isSamePublicationOrigin(request)) return failure("INVALID_ORIGIN", "La solicitud debe iniciarse desde este sitio.", 403);
   let auth: Awaited<ReturnType<typeof getVerifiedPublicationUser>>;
   try { auth = await getVerifiedPublicationUser(); }
   catch { return failure("PUBLICATION_FAILED", "El servicio de publicación no está disponible.", 503); }
@@ -60,7 +43,8 @@ export async function POST(request: Request): Promise<Response> {
   let input: ReturnType<typeof validatePublication>;
   try { input = validatePublication(await readForm(request)); }
   catch (error) {
-    if (error instanceof BodyTooLarge) return rejectBeforePreparation("REQUEST_TOO_LARGE", "La solicitud supera el tamaño permitido.", 413);
+    if (error instanceof BodyReadError && error.code === "REQUEST_TOO_LARGE") return rejectBeforePreparation(error.code, "La solicitud supera el tamaño permitido.", 413);
+    if (error instanceof BodyReadError && error.code === "REQUEST_TIMEOUT") return rejectBeforePreparation(error.code, "El envío tardó demasiado. Comprueba la conexión.", 408);
     if (error instanceof PublicationValidationError) return rejectBeforePreparation("VALIDATION_ERROR", error.message, 400);
     return rejectBeforePreparation("INVALID_REQUEST", "No se pudo leer el formulario.", 400);
   }
