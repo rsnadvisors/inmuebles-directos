@@ -212,7 +212,7 @@ describe("Phase 2 closed cohort composition",()=>{
 describe("existing routes and effective guards",()=>{
  it("account preserves identity, management, signout and own inventory",async()=>{
   render(await Account());expect(screen.getByRole("heading",{name:"Mi cuenta",level:1})).toBeTruthy();
-  expect(screen.getByText("Fixture propia")).toBeTruthy();expect(screen.getByRole("link",{name:"Mis propiedades"}).getAttribute("href")).toBe("/mis-propiedades");
+  expect(screen.getByRole("heading",{name:"Fixture propia",level:2})).toBeTruthy();expect(screen.getByRole("button",{name:"Cerrar sesión"})).toBeTruthy();expect(screen.getByRole("link",{name:"Mis propiedades"}).getAttribute("href")).toBe("/mis-propiedades");
   expect(screen.getByRole("region",{name:"Tus propiedades"})).toBeTruthy();expect(screen.getAllByText("50%")).toHaveLength(2);
   expect(stubs.profile).toHaveBeenCalledWith("id","aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
   expect(stubs.query.mock.calls.every(([,scope])=>scope==="OWN_PROPERTY")).toBe(true);
