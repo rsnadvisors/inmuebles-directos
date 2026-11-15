@@ -310,6 +310,7 @@ def main():
     replay=expect_rpc('prepare_publication_attempt',jobs[next(i for i,r in enumerate(results) if r[0]==200)][2]); record('deleted parent replay does not recreate',not replay['parentValid'] and not any(s['metadataValid'] for s in replay['slots']))
     status,_=finalize(replay); deny_http('deleted parent cannot finalize',status)
     cancel(replay)
+    owner_management(done['requestId'])
     # Antispam: at most five new attempts per owner in a rolling 24 h window (cancelled ones count).
     recent=admin("select count(*) from private.publication_attempts where owner_id='"+A+"' and created_at>now()-interval '24 hours';")
     record('owner reached five attempts in 24 h',int(recent)>=5)
@@ -327,6 +328,46 @@ def main():
     record('no anonymous function grants',admin("select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where p.proname like '%publication%' and n.nspname in ('private','public') and has_function_privilege('anon',p.oid,'EXECUTE');")=='0')
     counts={result:sum(r['result']==result for r in ROWS) for result in ('PASS','FAIL','NOT REPRODUCIBLE')}
     print('Real isolated publication REST/Storage:',json.dumps(counts,sort_keys=True))
+
+def owner_management(listing):
+    """Fase 1 de gestión: solo funciones controladas, solo el dueño, solo transiciones válidas."""
+    q="select status||':'||is_reserved||':'||owner_paused||':'||price::text||':'||coalesce(deletion_requested_at::text,'-') from public.properties where id='"+listing+"';"
+    edit={k:v for k,v in fields().items() if k not in ('listing_type','property_type')}
+    edit['price']=777; edit['bedrooms']=3
+    status,_=rpc('owner_update_listing',{'p_id':listing,'p_fields':edit},B); deny_http('other user cannot edit listing',status)
+    status,_=rpc('owner_update_listing',{'p_id':listing,'p_fields':edit},None); deny_http('anonymous cannot edit listing',status)
+    status,_=rpc('owner_set_listing_status',{'p_id':listing,'p_action':'pause'},B); deny_http('other user cannot change listing status',status)
+    status,_=rpc('owner_begin_listing_deletion',{'p_id':listing},B); deny_http('other user cannot delete listing',status)
+    record('foreign attempts left listing unchanged',admin(q)=='published:false:false:1.00:-' or admin(q).startswith('published:false:false:1:'),value=admin(q))
+    status,_=http('PATCH','properties?id=eq.'+listing,A,json.dumps({'price':5}).encode(),headers={'Prefer':'return=representation'})
+    record('owner still has no direct UPDATE',admin("select price from public.properties where id='"+listing+"';") in ('1','1.00'),http=status)
+    status,_=rpc('owner_update_listing',{'p_id':listing,'p_fields':{**edit,'owner_id':B}}); deny_http('extra field rejected',status)
+    status,_=rpc('owner_update_listing',{'p_id':listing,'p_fields':{**edit,'price':0}}); deny_http('invalid price rejected',status)
+    status,_=rpc('owner_update_listing',{'p_id':listing,'p_fields':edit}); record('owner edits price and data',status==200 and admin("select price::int||':'||bedrooms from public.properties where id='"+listing+"';")=='777:3',http=status)
+    status,_=rpc('owner_set_listing_status',{'p_id':listing,'p_action':'mark_rented'}); deny_http('sale listing cannot be marked rented',status)
+    status,_=rpc('owner_set_listing_status',{'p_id':listing,'p_action':'reactivate'}); deny_http('published listing cannot reactivate',status)
+    status,_=rpc('owner_set_listing_status',{'p_id':listing,'p_action':'reserve'}); record('owner reserves',status==200 and admin(q).startswith('published:true:false'),http=status)
+    status,_=rpc('owner_set_listing_status',{'p_id':listing,'p_action':'pause'}); record('owner pauses (hidden, reservation cleared)',status==200 and admin(q).startswith('archived:false:true'),http=status)
+    status,data=http('GET','properties?id=eq.'+listing+'&select=id',None); record('paused listing hidden from public',status==200 and json.loads(data)==[],http=status)
+    status,_=rpc('owner_set_listing_status',{'p_id':listing,'p_action':'reactivate'}); record('owner reactivates paused listing',status==200 and admin(q).startswith('published:false:false'),http=status)
+    status,_=rpc('owner_set_listing_status',{'p_id':listing,'p_action':'mark_sold'}); record('owner marks sold',status==200 and admin(q).startswith('sold:'),http=status)
+    status,_=rpc('owner_set_listing_status',{'p_id':listing,'p_action':'reactivate'}); record('owner republishes sold listing',status==200 and admin(q).startswith('published:'),http=status)
+    admin("update public.properties set status='archived', owner_paused=false where id='"+listing+"';")
+    status,_=rpc('owner_set_listing_status',{'p_id':listing,'p_action':'reactivate'}); deny_http('moderated listing cannot be reactivated by owner',status)
+    status,_=rpc('owner_update_listing',{'p_id':listing,'p_fields':edit}); deny_http('moderated listing cannot be edited by owner',status)
+    admin("update public.properties set status='published' where id='"+listing+"';")
+    paths=json.loads(admin("select coalesce(json_agg(storage_path),'[]') from public.property_images where property_id='"+listing+"';"))
+    status,_=http('DELETE','object/property-images-private/'+paths[0],A,storage=True); obj=admin("select count(*) from storage.objects where name='"+paths[0]+"';")
+    record('published images cannot be deleted by owner before deletion request',obj=='1',http=status)
+    status,_=rpc('owner_finish_listing_deletion',{'p_id':listing}); deny_http('finish without begin rejected',status)
+    status,begun=rpc('owner_begin_listing_deletion',{'p_id':listing}); record('deletion begins and hides listing',status==200 and admin(q).startswith('archived:false:false') and sorted(begun['paths'])==sorted(paths),http=status)
+    status,_=rpc('owner_finish_listing_deletion',{'p_id':listing}); deny_http('finish refused while images remain',status)
+    status,_=http('DELETE','object/property-images-private/'+paths[0],B,storage=True)
+    record('other user cannot delete images of a listing being deleted',admin("select count(*) from storage.objects where name='"+paths[0]+"';")=='1',http=status)
+    for path in paths:
+        status,_=http('DELETE','object/property-images-private/'+path,A,storage=True); assert status==200,status
+    status,_=rpc('owner_finish_listing_deletion',{'p_id':listing}); record('owner deletion completes',status==200 and admin("select count(*) from public.properties where id='"+listing+"';")=='0'
+      and admin("select count(*) from public.property_images where property_id='"+listing+"';")=='0',http=status)
 
 def race_test():
     content=PNG+b'\0'*(1024*1024-len(PNG)); plan,_=prepare(A,content=content)

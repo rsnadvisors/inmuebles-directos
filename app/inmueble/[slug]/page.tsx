@@ -66,7 +66,7 @@ export default async function PropertyPage({ params }: PageProps) {
       <PropertyGallery images={property.imageItems} title={property.title} />
       <div className="property-full-content">
         <section className="property-full-summary">
-          <p className="property-full-kicker">{property.operation} · {property.type}</p>
+          <p className="property-full-kicker">{property.operation} · {property.type}{property.reserved && <span className="reserved-badge">Reservado</span>}</p>
           <h1>{property.title}</h1>
           <p className="property-full-price">{formatPrice(property.price, property.currency)}</p>
           {property.location !== "Ubicación no especificada" && <p className="property-full-location">⌖ {property.location}</p>}

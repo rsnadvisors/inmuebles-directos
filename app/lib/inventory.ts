@@ -44,6 +44,7 @@ export type Listing = {
   location: string;
   publishedAt: string | null;
   contactPhone: string | null;
+  reserved: boolean;
 };
 export type MappableListing = Listing & { coords: [number, number] };
 export function propertyIcon(type: Listing["type"]): string {
@@ -146,7 +147,7 @@ export function normalizeListing(value: unknown): Listing | null {
     description: text(item.description), slug: text(item.slug) || undefined, status: text(item.status) || undefined,
     bedrooms: optionalNumber(item.bedrooms), bathrooms: optionalNumber(item.bathrooms), parkingSpaces: optionalNumber(item.parking_spaces),
     floors: optionalNumber(item.floors), publishedAt: text(item.published_at) || null,
-    coords: coordinates(item.lat, item.lng),
+    coords: coordinates(item.lat, item.lng), reserved: item.is_reserved === true,
     imageItems: images.map(({ url, altText }) => ({ url, altText })),
     images: images.map(image => image.url),
   };

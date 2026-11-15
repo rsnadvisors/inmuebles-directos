@@ -39,7 +39,7 @@ describe("Mis propiedades (panel)", () => {
     expect(tabs.getByRole("link", { name: "Publicadas 1" })).toBeTruthy();
     expect(tabs.getByRole("link", { name: "Borradores 1" })).toBeTruthy();
     expect(tabs.getByRole("link", { name: "Cerradas 1" })).toBeTruthy();
-    for (const label of ["Publicado", "Borrador", "Archivado"]) expect(screen.getByText(label)).toBeTruthy();
+    for (const label of ["Publicado", "Borrador", "Archivado por revisión"]) expect(screen.getByText(label)).toBeTruthy();
     const fichas = screen.getAllByRole("link", { name: "Ver ficha" });
     expect(fichas).toHaveLength(1);
     expect(fichas[0].getAttribute("href")).toBe("/inmueble/terreno-1");
