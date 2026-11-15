@@ -237,3 +237,5 @@ grant execute on function public.owner_remove_listing_image(uuid, uuid) to authe
 grant execute on function public.owner_set_image_order(uuid, uuid[]) to authenticated;
 grant execute on function public.owner_pending_image_cleanup() to authenticated;
 grant execute on function public.owner_delete_account() to authenticated;
+
+notify pgrst, 'reload schema';
