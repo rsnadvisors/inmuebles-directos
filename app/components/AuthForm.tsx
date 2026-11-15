@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { FormEvent, useRef, useState } from "react";
 import { getBrowserClient } from "../lib/auth-client";
 import { safeReturnTo } from "../lib/safe-return";
+import { LEGAL_VERSION } from "../lib/legal";
 import PasswordInput from "./PasswordInput";
 
 export default function AuthForm({ mode, returnTo, passwordUpdated = false }: { mode: "login" | "register"; returnTo: string; passwordUpdated?: boolean }) {
@@ -28,6 +29,7 @@ export default function AuthForm({ mode, returnTo, passwordUpdated = false }: { 
       if (fullName.length < 2 || fullName.length > 120) { setMessage("Escribe tu nombre completo (2 a 120 caracteres)."); return; }
       if (password.length < 8) { setMessage("La contraseña debe tener al menos 8 caracteres."); return; }
       if (password !== form.get("confirm_password")) { setMessage("Las contraseñas no coinciden."); return; }
+      if (form.get("accept_legal") !== "on") { setMessage("Debes aceptar los Términos y condiciones y la Política de privacidad."); return; }
     }
     pending.current = true;
     setBusy(true);
@@ -40,7 +42,8 @@ export default function AuthForm({ mode, returnTo, passwordUpdated = false }: { 
         router.refresh();
       } else {
         const { data, error } = await client.auth.signUp({ email, password, options: {
-          data: { full_name: fullName },
+          // Evidence of informed consent (Ley 29733): accepted version and timestamp.
+          data: { full_name: fullName, legal_version: LEGAL_VERSION, legal_accepted_at: new Date().toISOString() },
           emailRedirectTo: `${window.location.origin}/auth/callback?returnTo=${encodeURIComponent(destination)}`,
         } });
         if (error) { setMessage("No pudimos crear la cuenta. Comprueba los datos e inténtalo otra vez."); return; }
@@ -58,10 +61,15 @@ export default function AuthForm({ mode, returnTo, passwordUpdated = false }: { 
         <label>Correo electrónico<input name="email" type="email" autoComplete="email" required disabled={busy} /></label>
         <PasswordInput label="Contraseña" name="password" autoComplete={mode === "login" ? "current-password" : "new-password"} minLength={mode === "register" ? 8 : undefined} disabled={busy} describedBy="auth-feedback" />
         {mode === "register" && <PasswordInput label="Confirmar contraseña" name="confirm_password" autoComplete="new-password" disabled={busy} describedBy="auth-feedback" />}
+        {mode === "register" && <label className="auth-legal-consent" style={{ display: "flex", gap: 8, alignItems: "flex-start", fontWeight: 400 }}>
+          <input type="checkbox" name="accept_legal" required disabled={busy} style={{ width: "auto", marginTop: 4 }} />
+          <span>He leído y acepto los <Link href="/terminos" target="_blank">Términos y condiciones</Link> y la <Link href="/privacidad" target="_blank">Política de privacidad</Link>, y autorizo el tratamiento de mis datos personales conforme a la Ley N.º 29733.</span>
+        </label>}
         <button type="submit" disabled={busy}>{busy ? "Espera…" : mode === "login" ? "Entrar" : "Crear cuenta"}</button>
       </form>
       <p id="auth-feedback" role="status" className="auth-message">{message || (mode === "login" && passwordUpdated ? "Tu contraseña fue actualizada. Ya puedes iniciar sesión." : "")}</p>
       {mode === "login" && <p><Link href="/recuperar-password">¿Olvidaste tu contraseña?</Link></p>}
+      <p className="auth-legal-links" style={{ fontSize: 13 }}><Link href="/terminos">Términos</Link> · <Link href="/privacidad">Privacidad</Link></p>
       <p>{mode === "login" ? "¿Aún no tienes cuenta?" : "¿Ya tienes cuenta?"} <Link href={`${mode === "login" ? "/registro" : "/login"}?returnTo=${encodeURIComponent(destination)}`}>{mode === "login" ? "Crear cuenta" : "Iniciar sesión"}</Link></p>
     </section>
   </main>;

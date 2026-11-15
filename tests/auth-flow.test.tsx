@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import AuthForm from "../app/components/AuthForm";
 import SiteHeader from "../app/components/SiteHeader";
 import SignOutButton from "../app/components/SignOutButton";
+import { LEGAL_VERSION } from "../app/lib/legal";
 
 const stub = vi.hoisted(() => ({
   signIn: vi.fn(), signUp: vi.fn(), signOut: vi.fn(), getUser: vi.fn(), profile: vi.fn(), onAuthStateChange: vi.fn(),
@@ -50,9 +51,15 @@ describe("Supabase Auth UX", () => {
     fireEvent.change(screen.getByLabelText("Contraseña"), { target: { value: "12345678" } });
     fireEvent.change(screen.getByLabelText("Confirmar contraseña"), { target: { value: "12345678" } });
     fireEvent.submit(screen.getByLabelText("Correo electrónico").closest("form")!);
+    await waitFor(() => expect(screen.getByRole("status").textContent).toContain("Debes aceptar"));
+    expect(stub.signUp).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("checkbox"));
+    fireEvent.submit(screen.getByLabelText("Correo electrónico").closest("form")!);
     await waitFor(() => expect(stub.signUp).toHaveBeenCalledOnce());
     const options = stub.signUp.mock.calls[0][0].options;
-    expect(options.data).toEqual({ full_name: "Usuario Prueba" });
+    expect(options.data).toMatchObject({ full_name: "Usuario Prueba", legal_version: LEGAL_VERSION });
+    expect(Object.keys(options.data).sort()).toEqual(["full_name", "legal_accepted_at", "legal_version"]);
+    expect(new Date(options.data.legal_accepted_at).toString()).not.toBe("Invalid Date");
     expect(options.data.role).toBeUndefined();
     expect(options.emailRedirectTo).toContain("returnTo=%2Fpublicar");
     expect(screen.getByRole("status").textContent).toContain("Revisa tu correo");
