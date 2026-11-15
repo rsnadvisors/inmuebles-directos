@@ -66,7 +66,7 @@ export default function Home() {
       setAllListings([]);
       setSelected(null);
       try {
-        const { data, error } = await supabase.from("properties").select("id,title,slug,status,contact_phone,listing_type,property_type,price,currency,area_total_m2,address,district,city,region,country,description,bedrooms,bathrooms,parking_spaces,lat,lng,published_at,property_images(id,storage_bucket,public_url,alt_text,sort_order,is_cover)").eq("status", "published");
+        const { data, error } = await supabase.from("properties").select("id,title,slug,status,contact_phone,listing_type,property_type,price,currency,area_total_m2,address,district,city,region,country,description,bedrooms,bathrooms,parking_spaces,lat,lng,published_at,is_reserved,property_images(id,storage_bucket,public_url,alt_text,sort_order,is_cover)").eq("status", "published");
         if (!active || request !== requestSequence) return;
         if (error) throw error;
         setAllListings(normalizeInventory(data));
@@ -124,7 +124,7 @@ export default function Home() {
           <div className="listing-list">
             {inventoryState !== "success" ? <div className="empty-state" role={inventoryState === "error" ? "alert" : "status"}>{inventoryState === "loading" ? "Cargando propiedades…" : "No pudimos cargar las propiedades en este momento."}</div> : allListings.length === 0 ? <div className="empty-state">No hay propiedades disponibles en este momento.</div> : filtered.length === 0 ? <div className="empty-state">No encontramos propiedades con esos filtros.</div> : filtered.map((item) => (
               <article className={`listing-card ${selected?.id === item.id ? "selected" : ""}`} key={item.id}>
-                <div className={`listing-photo ${primaryImage(item) ? "" : "listing-photo-empty"}`}>{primaryImage(item) ? <img src={primaryImage(item)!.url} alt="" loading="lazy" /> : <><span aria-hidden="true">{propertyIcon(item.type)}</span><small>Sin fotografía</small></>}<b>{item.operation}</b></div>
+                <div className={`listing-photo ${primaryImage(item) ? "" : "listing-photo-empty"}`}>{primaryImage(item) ? <img src={primaryImage(item)!.url} alt="" loading="lazy" /> : <><span aria-hidden="true">{propertyIcon(item.type)}</span><small>Sin fotografía</small></>}<b>{item.operation}</b>{item.reserved && <b className="listing-reserved">Reservado</b>}</div>
                 <div className="listing-content"><div className="listing-price">{formatPrice(item.price, item.currency)}</div><h2>{item.title}</h2><p>{compactLocation(item)}</p><div className="listing-type">{item.type}</div><ListingAttributes listing={item} context="card" /><button className="detail-link" type="button" onClick={(event) => openDrawer(item, event.currentTarget)}>Ver detalles</button></div>
               </article>
             ))}
@@ -136,7 +136,7 @@ export default function Home() {
       {selected && <div className="property-drawer" role="dialog" aria-label={`Ficha de ${selected.title}`}>
         <button ref={drawerCloseRef} className="drawer-close" type="button" onClick={() => closeDrawer()} aria-label="Cerrar detalle de propiedad">×</button>
         {selected.images.length > 0 ? <div className="drawer-gallery"><button className="drawer-main-image" type="button" onClick={() => setGalleryOpen(true)} aria-label="Ampliar galería"><img src={selected.images[galleryIndex]} alt={selected.title} /><span>{galleryIndex + 1} / {selected.images.length}</span></button><div>{selected.images.slice(0, 5).map((image, index) => <button key={image} type="button" aria-label={`Ver imagen ${index + 1}`} className={galleryIndex === index ? "active" : ""} onClick={() => setGalleryIndex(index)}><img src={image} alt="" /></button>)}</div></div> : <div className="drawer-media-empty"><span aria-hidden="true">{propertyIcon(selected.type)}</span><strong>Sin fotografías disponibles</strong></div>}
-        <div className="drawer-kicker">{selected.operation} · {selected.type}</div><h2>{selected.title}</h2><div className="drawer-price">{formatPrice(selected.price, selected.currency)}</div>
+        <div className="drawer-kicker">{selected.operation} · {selected.type}{selected.reserved && <span className="reserved-badge">Reservado</span>}</div><h2>{selected.title}</h2><div className="drawer-price">{formatPrice(selected.price, selected.currency)}</div>
         {selected.description && <p className="drawer-description">{selected.description}</p>}
         <div className="drawer-location"><span aria-hidden="true">⌖</span> {previewLocation(selected)}</div><ListingAttributes listing={selected} context="drawer" />
         <div className="drawer-actions">{selected.slug && <Link className="drawer-primary-action" href={`/inmueble/${selected.slug}`}>Ficha completa</Link>}{selected.coords && <button className="drawer-secondary-action" type="button" onClick={() => closeDrawer(true)}>Ver mapa</button>}</div>
