@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GET } from "../app/auth/callback/route";
 
-const auth = vi.hoisted(() => ({ exchange: vi.fn() }));
+const auth = vi.hoisted(() => ({ exchange: vi.fn(), verify: vi.fn() }));
 let diagnosticLog: ReturnType<typeof vi.spyOn>;
 
 vi.mock("@supabase/ssr", () => ({
@@ -11,6 +11,7 @@ vi.mock("@supabase/ssr", () => ({
   }) => ({
     auth: {
       exchangeCodeForSession: (code: string) => auth.exchange(code, options.cookies.setAll),
+      verifyOtp: (params: { token_hash: string; type: string }) => auth.verify(params, options.cookies.setAll),
     },
   }),
 }));
@@ -147,5 +148,36 @@ describe("Auth callback redirects", () => {
     vi.stubEnv("NODE_ENV", "development");
     const response = await GET(callback("/cuenta", "fixture-code", "http://localhost:3103"));
     expect(response.headers.get("location")).toBe("http://localhost:3103/cuenta");
+  });
+  it("accepts token_hash recovery links and lands on the reset page", async () => {
+    auth.verify.mockImplementation(async (_p: unknown, setAll: (i: { name: string; value: string; options: { path: string } }[]) => void) => {
+      setAll([{ name: "sb-session", value: "fixture", options: { path: "/" } }]); return { error: null };
+    });
+    const url = new URL("/auth/callback", "https://localhost:8080");
+    url.searchParams.set("token_hash", "pkce_fixture_hash_123"); url.searchParams.set("type", "recovery");
+    url.searchParams.set("returnTo", "/restablecer-password");
+    const response = await GET(new NextRequest(url));
+    expect(auth.verify).toHaveBeenCalledWith({ token_hash: "pkce_fixture_hash_123", type: "recovery" }, expect.any(Function));
+    expect(response.headers.get("location")).toBe("https://inmueblesdirectos.com/restablecer-password");
+    expect(response.headers.get("set-cookie")).toContain("sb-session=fixture");
+    expect(auth.exchange).not.toHaveBeenCalled();
+  });
+
+  it("rejects invalid token_hash links without calling Supabase", async () => {
+    const url = new URL("/auth/callback", "https://localhost:8080");
+    url.searchParams.set("token_hash", "bad hash!"); url.searchParams.set("type", "recovery");
+    url.searchParams.set("returnTo", "/restablecer-password");
+    const response = await GET(new NextRequest(url));
+    expect(auth.verify).not.toHaveBeenCalled();
+    expect(response.headers.get("location")).toBe("https://inmueblesdirectos.com/recuperar-password?error=recovery");
+  });
+
+  it("sends failed token_hash verification to the recovery error page", async () => {
+    auth.verify.mockResolvedValue({ error: { name: "AuthApiError", code: "otp_expired" } });
+    const url = new URL("/auth/callback", "https://localhost:8080");
+    url.searchParams.set("token_hash", "expired_fixture_hash"); url.searchParams.set("type", "recovery");
+    url.searchParams.set("returnTo", "/restablecer-password");
+    const response = await GET(new NextRequest(url));
+    expect(response.headers.get("location")).toBe("https://inmueblesdirectos.com/recuperar-password?error=recovery");
   });
 });
