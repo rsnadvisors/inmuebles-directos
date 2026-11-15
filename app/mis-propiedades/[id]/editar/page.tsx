@@ -4,10 +4,12 @@ import { getVerifiedUser } from "../../../lib/auth-server";
 import { availableActions, LISTING_ID } from "../../../lib/listing-management";
 import AccountShell from "../../../components/account/AccountShell";
 import EditListingForm, { type EditListingInitial } from "../../../components/account/EditListingForm";
+import PhotoManager from "../../../components/account/PhotoManager";
+import { resolvePropertyImage } from "../../../lib/property-image-source";
 
 export const dynamic = "force-dynamic";
 
-const EDIT_SELECT = "id,title,slug,status,listing_type,property_type,price,currency,contact_phone,maintenance_fee,area_total_m2,area_built_m2,bedrooms,bathrooms,parking_spaces,floors,description,address,district,city,region,lat,lng,published_at,is_reserved,owner_paused,deletion_requested_at";
+const EDIT_SELECT = "id,title,slug,status,listing_type,property_type,price,currency,contact_phone,maintenance_fee,area_total_m2,area_built_m2,bedrooms,bathrooms,parking_spaces,floors,description,address,district,city,region,lat,lng,published_at,is_reserved,owner_paused,deletion_requested_at,property_images(id,storage_bucket,public_url,sort_order,is_cover)";
 
 export default async function EditListingPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -21,9 +23,17 @@ export default async function EditListingPage({ params }: { params: Promise<{ id
   if (!row) notFound();
   const display = typeof profile?.full_name === "string" && profile.full_name.trim() ? profile.full_name.trim() : user.email || "Mi cuenta";
   const { canEdit } = availableActions(row);
+  type Img = { id: string; storage_bucket: string | null; public_url: string | null; sort_order: number; is_cover: boolean };
+  const photos = [...((row as { property_images?: Img[] }).property_images ?? [])]
+    .sort((a, b) => Number(b.is_cover) - Number(a.is_cover) || a.sort_order - b.sort_order)
+    .map(image => {
+      const src = resolvePropertyImage(image);
+      // Non-published listings are private: the owner sees them through the authenticated preview.
+      return { id: image.id, src: src && row.status !== "published" && src.startsWith("/api/property-images/") ? `${src}/preview` : src };
+    });
   return <AccountShell active="propiedades" name={display} email={user.email} title="Editar anuncio" subtitle={row.title}
     action={<Link href="/mis-propiedades" className="acct-btn acct-btn-quiet">Volver a Mis propiedades</Link>}>
-    {canEdit ? <EditListingForm initial={row as EditListingInitial} />
+    {canEdit ? <><PhotoManager listingId={row.id} photos={photos} /><h2 className="acct-section-title">Datos del anuncio</h2><EditListingForm initial={row as EditListingInitial} /></>
       : <div className="acct-empty"><h2>Este anuncio no se puede editar ahora</h2><p>Los borradores, los anuncios en eliminación y los archivados por revisión no admiten cambios.</p><Link href="/mis-propiedades" className="acct-btn">Volver</Link></div>}
   </AccountShell>;
 }

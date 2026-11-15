@@ -61,6 +61,15 @@ export default async function Account({ searchParams }: { searchParams?: Promise
         <Link href="/recuperar-password" className="acct-btn acct-btn-quiet">Cambiar contraseña</Link>
       </div>
 
+      <h2 className="acct-section-title">Tus datos personales</h2>
+      <div className="acct-security">
+        <p>Puedes descargar una copia de tus datos o eliminar tu cuenta con todos tus anuncios y fotos (Ley N.º 29733).</p>
+        <div className="acct-manage-buttons">
+          <a href="/api/mi-cuenta/datos" className="acct-btn acct-btn-quiet" download>Descargar mis datos</a>
+          <Link href="/cuenta/eliminar" className="acct-btn acct-btn-danger">Eliminar mi cuenta</Link>
+        </div>
+      </div>
+
       <p className="acct-legal"><Link href="/terminos">Términos y condiciones</Link> · <Link href="/privacidad">Política de privacidad</Link></p>
     </AccountShell>
   );
