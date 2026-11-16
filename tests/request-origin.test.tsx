@@ -12,20 +12,20 @@ describe('real Next proxy loopback origin regression',()=>{
   });
   it('does not trust nonloopback Host for Auth redirects',()=>{
     vi.stubEnv('NODE_ENV','development');expect(authRequestOrigin(req('','external.invalid'))).toBe('http://localhost:3100');
-    expect(authRequestOrigin(req('','external.invalid','http://10.0.0.1:3100/auth/callback'))).toBe('https://inmueblesdirectos.com');
+    expect(authRequestOrigin(req('','external.invalid','http://10.0.0.1:3100/auth/callback'))).toBe('https://inmueblesdirectosperu.com');
   });
   it('uses the configured canonical origin in production',()=>{
     vi.stubEnv('NODE_ENV','production');vi.stubEnv('NEXT_PUBLIC_SITE_ORIGIN','https://portal.example.test');
     expect(authRequestOrigin(req('','127.0.0.1:3100'))).toBe('https://portal.example.test');
     expect(isSamePublicationOrigin(req('https://portal.example.test','127.0.0.1:3100'))).toBe(true);
-    expect(isSamePublicationOrigin(req('https://inmueblesdirectos.com','127.0.0.1:3100'))).toBe(false);
+    expect(isSamePublicationOrigin(req('https://inmueblesdirectosperu.com','127.0.0.1:3100'))).toBe(false);
   });
   it('fails closed in production when the configured origin is invalid',()=>{
     vi.stubEnv('NODE_ENV','production');vi.stubEnv('NEXT_PUBLIC_SITE_ORIGIN','http://insecure.example.test');
     expect(isSamePublicationOrigin(req('http://insecure.example.test','127.0.0.1:3100'))).toBe(false);
   });
   it('production callback never derives a redirect from Host',()=>{
-    vi.stubEnv('NODE_ENV','production');expect(authRequestOrigin(req('','127.0.0.1:3100'))).toBe('https://inmueblesdirectos.com');
+    vi.stubEnv('NODE_ENV','production');expect(authRequestOrigin(req('','127.0.0.1:3100'))).toBe('https://inmueblesdirectosperu.com');
   });
   it('accepts browser 127.0.0.1 when Next normalizes request URL to localhost',()=>{
     vi.stubEnv('NODE_ENV','development');expect(isSamePublicationOrigin(req('http://127.0.0.1:3100','127.0.0.1:3100'))).toBe(true);
@@ -55,6 +55,6 @@ describe('real Next proxy loopback origin regression',()=>{
     vi.stubEnv('NODE_ENV','production');expect(isSamePublicationOrigin(req(origin,'127.0.0.1:3100'))).toBe(false);
   });
   it('production retains its fixed canonical origin behind a reverse proxy',()=>{
-    vi.stubEnv('NODE_ENV','production');expect(isSamePublicationOrigin(req('https://inmueblesdirectos.com','127.0.0.1:3100'))).toBe(true);
+    vi.stubEnv('NODE_ENV','production');expect(isSamePublicationOrigin(req('https://inmueblesdirectosperu.com','127.0.0.1:3100'))).toBe(true);
   });
 });

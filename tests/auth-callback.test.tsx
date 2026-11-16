@@ -49,26 +49,26 @@ describe("Auth callback redirects", () => {
       return { data: { redirectType: "recovery" }, error: null };
     });
     const response = await GET(callback("/cuenta", "fixture-code"));
-    expect(response.headers.get("location")).toBe("https://inmueblesdirectos.com/restablecer-password");
+    expect(response.headers.get("location")).toBe("https://inmueblesdirectosperu.com/restablecer-password");
     expect(response.cookies.get("sb-session")?.value).toBe("fixture-session");
   });
 
   it("retains the fixed recovery destination after a successful exchange", async () => {
     const response = await GET(callback("/restablecer-password", "fixture-code"));
-    expect(response.headers.get("location")).toBe("https://inmueblesdirectos.com/restablecer-password");
+    expect(response.headers.get("location")).toBe("https://inmueblesdirectosperu.com/restablecer-password");
   });
 
   it.each(["missing", "expired", "network"])("fails recovery safely for %s code", async failure => {
     if (failure === "expired") auth.exchange.mockResolvedValueOnce({ error: new Error("sensitive failure") });
     if (failure === "network") auth.exchange.mockRejectedValueOnce(new Error("sensitive failure"));
     const response = await GET(callback("/restablecer-password", failure === "missing" ? undefined : "fixture-code"));
-    expect(response.headers.get("location")).toBe("https://inmueblesdirectos.com/recuperar-password?error=recovery");
+    expect(response.headers.get("location")).toBe("https://inmueblesdirectosperu.com/recuperar-password?error=recovery");
     expect(JSON.stringify(diagnosticLog.mock.calls)).not.toContain("sensitive failure");
   });
 
   it("uses the production origin on success and preserves session cookies", async () => {
     const response = await GET(callback("/cuenta", "fixture-code", undefined, "sb-project-auth-token-code-verifier=fixture-verifier"));
-    expect(response.headers.get("location")).toBe("https://inmueblesdirectos.com/cuenta");
+    expect(response.headers.get("location")).toBe("https://inmueblesdirectosperu.com/cuenta");
     expect(response.cookies.get("sb-session")?.value).toBe("fixture-session");
     expect(auth.exchange).toHaveBeenCalledWith("fixture-code", expect.any(Function));
     expect(resultLog()).toMatchObject({ callbackInvoked: true, codePresent: true, verifierCookiePresent: true, exchangeAttempted: true, exchangeResult: "success", cookieWriteCount: 1, redirectBranch: "success" });
@@ -76,7 +76,7 @@ describe("Auth callback redirects", () => {
 
   it("uses the production origin when the code is missing", async () => {
     const response = await GET(callback("/cuenta"));
-    expect(response.headers.get("location")).toBe("https://inmueblesdirectos.com/login?error=confirmation");
+    expect(response.headers.get("location")).toBe("https://inmueblesdirectosperu.com/login?error=confirmation");
     expect(auth.exchange).not.toHaveBeenCalled();
     expect(resultLog()).toMatchObject({ codePresent: false, exchangeAttempted: false, exchangeResult: "not_attempted", failureClass: "missing_code", redirectBranch: "error" });
   });
@@ -128,19 +128,19 @@ describe("Auth callback redirects", () => {
   it("uses the production origin when code exchange fails", async () => {
     auth.exchange.mockResolvedValueOnce({ error: new Error("fixture failure") });
     const response = await GET(callback("/cuenta", "fixture-code"));
-    expect(response.headers.get("location")).toBe("https://inmueblesdirectos.com/login?error=confirmation");
+    expect(response.headers.get("location")).toBe("https://inmueblesdirectosperu.com/login?error=confirmation");
   });
 
   it.each(["/publicar", "/mis-propiedades"])("keeps a safe internal destination %s", async destination => {
     const response = await GET(callback(destination, "fixture-code"));
-    expect(response.headers.get("location")).toBe(`https://inmueblesdirectos.com${destination}`);
+    expect(response.headers.get("location")).toBe(`https://inmueblesdirectosperu.com${destination}`);
   });
 
   it.each(["https://evil.example", "//evil.example", "javascript:alert(1)", "data:text/html,evil", "\\evil.example"])(
     "rejects an unsafe returnTo value %s",
     async destination => {
       const response = await GET(callback(destination, "fixture-code"));
-      expect(response.headers.get("location")).toBe("https://inmueblesdirectos.com/cuenta");
+      expect(response.headers.get("location")).toBe("https://inmueblesdirectosperu.com/cuenta");
     },
   );
 
@@ -158,7 +158,7 @@ describe("Auth callback redirects", () => {
     url.searchParams.set("returnTo", "/restablecer-password");
     const response = await GET(new NextRequest(url));
     expect(auth.verify).toHaveBeenCalledWith({ token_hash: "pkce_fixture_hash_123", type: "recovery" }, expect.any(Function));
-    expect(response.headers.get("location")).toBe("https://inmueblesdirectos.com/restablecer-password");
+    expect(response.headers.get("location")).toBe("https://inmueblesdirectosperu.com/restablecer-password");
     expect(response.headers.get("set-cookie")).toContain("sb-session=fixture");
     expect(auth.exchange).not.toHaveBeenCalled();
   });
@@ -169,7 +169,7 @@ describe("Auth callback redirects", () => {
     url.searchParams.set("returnTo", "/restablecer-password");
     const response = await GET(new NextRequest(url));
     expect(auth.verify).not.toHaveBeenCalled();
-    expect(response.headers.get("location")).toBe("https://inmueblesdirectos.com/recuperar-password?error=recovery");
+    expect(response.headers.get("location")).toBe("https://inmueblesdirectosperu.com/recuperar-password?error=recovery");
   });
 
   it("sends failed token_hash verification to the recovery error page", async () => {
@@ -178,6 +178,6 @@ describe("Auth callback redirects", () => {
     url.searchParams.set("token_hash", "expired_fixture_hash"); url.searchParams.set("type", "recovery");
     url.searchParams.set("returnTo", "/restablecer-password");
     const response = await GET(new NextRequest(url));
-    expect(response.headers.get("location")).toBe("https://inmueblesdirectos.com/recuperar-password?error=recovery");
+    expect(response.headers.get("location")).toBe("https://inmueblesdirectosperu.com/recuperar-password?error=recovery");
   });
 });

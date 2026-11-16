@@ -1,4 +1,4 @@
-const CURRENT_SITE_ORIGIN = "https://inmueblesdirectos.com";
+const CURRENT_SITE_ORIGIN = "https://inmueblesdirectosperu.com";
 
 export function siteOrigin(): string {
   const configured = process.env.NEXT_PUBLIC_SITE_ORIGIN;

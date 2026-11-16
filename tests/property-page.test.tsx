@@ -36,7 +36,7 @@ describe("canonical property page", () => {
     const imageId = "11111111-1111-4111-8111-111111111111";
     setInventory([{ ...properties[0], property_images: [{ id: imageId, storage_bucket: "property-images-private", public_url: null, sort_order: 0, is_cover: true, alt_text: "Fachada" }] }]);
     const metadata = await generateMetadata({ params: Promise.resolve({ slug: "fixture-house" }) });
-    expect(metadata.openGraph?.images).toEqual([{ url: `https://inmueblesdirectos.com/api/property-images/${imageId}`, alt: "Fachada" }]);
+    expect(metadata.openGraph?.images).toEqual([{ url: `https://inmueblesdirectosperu.com/api/property-images/${imageId}`, alt: "Fachada" }]);
     render(await PropertyPage({ params: Promise.resolve({ slug: "fixture-house" }) }));
     expect(screen.getByAltText("Fachada").getAttribute("src")).toBe(`/api/property-images/${imageId}`);
   });

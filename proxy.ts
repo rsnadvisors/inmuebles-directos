@@ -1,7 +1,15 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextRequest, NextResponse } from "next/server";
+import { canonicalRedirect } from "./app/lib/canonical-host";
+import { siteOrigin } from "./app/lib/auth-origin";
 
 export async function proxy(request: NextRequest) {
+  if (process.env.NODE_ENV === "production") {
+    let target: string | null = null;
+    try { target = canonicalRedirect(request.url, siteOrigin()); } catch { target = null; }
+    // 301 for GET/HEAD (SEO); 308 keeps the method for anything else.
+    if (target) return NextResponse.redirect(target, ["GET", "HEAD"].includes(request.method) ? 301 : 308);
+  }
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   let response = NextResponse.next({ request });
