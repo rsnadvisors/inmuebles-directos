@@ -43,7 +43,7 @@ beforeEach(()=>{
  approved=false;total=20;active=0;peak=0;
  stubs.verified.mockReset();stubs.query.mockReset();stubs.rpc.mockReset();stubs.profile.mockReset();stubs.legacy.mockReset();stubs.redirect.mockReset();
  const client={rpc:stubs.rpc,from:vi.fn(()=>({select:vi.fn(()=>({eq:stubs.profile}))}))};
- stubs.profile.mockReturnValue({maybeSingle:async()=>({data:{full_name:"Fixture propia"}})});
+ stubs.profile.mockReturnValue({maybeSingle:async()=>({data:{full_name:"Fixture propia"}}),order:async()=>({data:[],error:null})});
  stubs.verified.mockResolvedValue({client,user:{id:"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",email:"fixture@example.invalid",user_metadata:{role:"admin"}}});
  stubs.rpc.mockImplementation(async()=>({data:approved,error:null}));
  stubs.legacy.mockResolvedValue({counts:Object.fromEntries(["profiles_total","today","7d","30d","views_raw_count","leads_raw_count","favorites_count"].map(k=>[k,2])),markets:[]});
@@ -199,9 +199,8 @@ describe("Phase 2 closed cohort composition",()=>{
   total=0;const r=response("publication_share","OWN_PROPERTY");if(r.ok)stubs.query.mockResolvedValue({...r,result:{...r.result,filters:{operation:"rent"}}});
   const view=await loadOwnInventoryOverview({operation:"rent"});expect(view.empty).toBe(true);expect(stubs.query).toHaveBeenCalledTimes(1);
  });
- it("URL scope injection is refused after account identity and before analytics",async()=>{
-  render(await Account({searchParams:Promise.resolve({owner_id:"other",operation:"sale"})}));
-  expect(screen.getByRole("alert")).toBeTruthy();expect(stubs.query).not.toHaveBeenCalled();
+ it("Mi cuenta no consulta la analítica de inventario (sustituida por el dashboard del anunciante)",async()=>{
+  render(await Account());expect(stubs.query).not.toHaveBeenCalled();
  });
  it("a valid filter cannot admit an unapproved admin",async()=>{
   render(await AdminPage({searchParams:Promise.resolve({operation:"rent"})}));
@@ -210,23 +209,16 @@ describe("Phase 2 closed cohort composition",()=>{
 });
 
 describe("existing routes and effective guards",()=>{
- it("account preserves identity, management, signout and own inventory",async()=>{
-  render(await Account());expect(screen.getByRole("heading",{name:"Mi cuenta",level:1})).toBeTruthy();
-  expect(screen.getByRole("heading",{name:"Fixture propia",level:2})).toBeTruthy();expect(screen.getByRole("button",{name:"Cerrar sesión"})).toBeTruthy();expect(screen.getByRole("link",{name:"Mis propiedades"}).getAttribute("href")).toBe("/mis-propiedades");
-  expect(screen.getByRole("region",{name:"Tus propiedades"})).toBeTruthy();expect(screen.getAllByText("50%")).toHaveLength(2);
+ it("account preserves identity, management and signout",async()=>{
+  render(await Account());expect(screen.getByRole("heading",{name:"Hola, Fixture",level:1})).toBeTruthy();
+  expect(screen.getAllByText("Fixture propia").length).toBeGreaterThan(0);expect(screen.getAllByRole("button",{name:"Cerrar sesión"}).length).toBeGreaterThan(0);
+  expect(screen.getByRole("link",{name:"Mis propiedades"}).getAttribute("href")).toBe("/mis-propiedades");
+  expect(screen.getByRole("heading",{name:"Publica tu primer inmueble"})).toBeTruthy();
   expect(stubs.profile).toHaveBeenCalledWith("id","aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
-  expect(stubs.query.mock.calls.every(([,scope])=>scope==="OWN_PROPERTY")).toBe(true);
  });
  it("missing account session redirects before any BI source",async()=>{
   stubs.verified.mockResolvedValue({client:null,user:null});await expect(Account()).rejects.toThrow("REDIRECT:/login?returnTo=/cuenta");
   expect(stubs.query).not.toHaveBeenCalled();
- });
- it("late account authorization failure hides every figure",async()=>{
-  installSource({metric:"type_mix",code:"FORBIDDEN"});render(await Account());
-  expect(screen.getByRole("alert")).toBeTruthy();expect(screen.queryByText("20")).toBeNull();expect(screen.queryByRole("region",{name:"Tus propiedades"})).toBeNull();
- });
- it("late account 401 uses existing login return path",async()=>{
-  installSource({metric:"type_mix",code:"UNAUTHORIZED"});await expect(Account()).rejects.toThrow("REDIRECT:/login?returnTo=/cuenta");
  });
  it("non-member admin never obtains BI or legacy summary",async()=>{
   render(await AdminPage());expect(screen.getByRole("heading",{name:"Acceso restringido"})).toBeTruthy();expect(stubs.query).not.toHaveBeenCalled();expect(stubs.legacy).not.toHaveBeenCalled();
