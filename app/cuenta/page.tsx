@@ -58,7 +58,9 @@ export default async function Account() {
   const published = listings.filter(l => l.status === "published" && !l.deletion_requested_at);
   const paused = listings.filter(l => l.status === "archived" && !!l.owner_paused && !l.deletion_requested_at).length;
   const attention = attentionItems(listings, s30);
-  const perListing = published.map(l => ({ id: l.id, title: l.title, counts: s30[l.id] ?? counts(null) }))
+  const now = Date.now();
+  const perListing = published.map(l => ({ id: l.id, title: l.title, counts: s30[l.id] ?? counts(null),
+    ageDays: (now - Date.parse(l.renewed_at ?? l.published_at ?? new Date(now).toISOString())) / 86_400_000 }))
     .sort((a, b) => contacts(b.counts) - contacts(a.counts));
 
   const subtitle = listings.length === 0 ? "Aquí verás cómo rinden tus anuncios."
