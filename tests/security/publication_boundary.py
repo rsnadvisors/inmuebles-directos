@@ -313,6 +313,7 @@ def main():
     owner_management(done['requestId'])
     owner_photos()
     expiry_and_stats()
+    market_capture()
     account_deletion()
     # Antispam: at most five new attempts per owner in a rolling 24 h window (cancelled ones count).
     recent=admin("select count(*) from private.publication_attempts where owner_id='"+A+"' and created_at>now()-interval '24 hours';")
@@ -450,6 +451,37 @@ def expiry_and_stats():
     admin("select public.expire_stale_listings();"); record('fresh term is not expired again',admin(q)=='published:false:false')
     status,_=rpc('owner_set_listing_status',{'p_id':listing,'p_action':'renew'},A); deny_http('other user cannot renew',status)
     status,_=rpc('owner_set_listing_status',{'p_id':listing,'p_action':'renew'},B); record('owner renews published listing',status==200,http=status)
+
+def market_capture():
+    """Captura de mercado: historial de precios y de estados por disparador, cierre y búsquedas agregadas."""
+    listing=admin("select id from public.properties where owner_id='"+B+"' and status='published' order by created_at limit 1;")
+    prices=lambda: int(admin("select count(*) from private.listing_price_history where property_id='"+listing+"';"))
+    states=lambda: admin("select string_agg(to_state, ',' order by id) from private.listing_status_events where property_id='"+listing+"';")
+    record('listing has price history from creation',prices()>=1)
+    before=prices()
+    edit={k:v for k,v in fields().items() if k not in ('listing_type','property_type')}
+    edit['price']=4321
+    status,_=rpc('owner_update_listing',{'p_id':listing,'p_fields':edit},B)
+    record('price change is recorded once',status==200 and prices()==before+1
+      and admin("select price::int from private.listing_price_history where property_id='"+listing+"' order by id desc limit 1;")=='4321',http=status)
+    status,_=rpc('owner_update_listing',{'p_id':listing,'p_fields':edit},B)
+    record('same price does not duplicate history',status==200 and prices()==before+1,http=status)
+    for action in ('pause','reactivate','mark_sold'):
+        status,_=rpc('owner_set_listing_status',{'p_id':listing,'p_action':action},B); assert status==200,(action,status)
+    record('status changes are recorded with business states',states().endswith('paused,published,sold'),value=states())
+    status,_=rpc('owner_set_close_feedback',{'p_id':listing,'p_via_portal':True},A); deny_http('other user cannot answer close feedback',status)
+    status,_=rpc('owner_set_close_feedback',{'p_id':listing,'p_via_portal':True},B)
+    record('owner answers close feedback on sold listing',status==200 and admin("select closed_via_portal from public.properties where id='"+listing+"';")=='t',http=status)
+    status,_=rpc('owner_set_listing_status',{'p_id':listing,'p_action':'reactivate'},B); assert status==200,status
+    status,_=rpc('owner_set_close_feedback',{'p_id':listing,'p_via_portal':False},B); deny_http('close feedback only for sold or rented',status)
+    for table in ('listing_price_history','listing_status_events','search_counts'):
+        status,_=http('GET',table+'?select=*',None); deny_http('market table not exposed: '+table,status)
+    searches=lambda: admin("select coalesce(sum(count),0) from private.search_counts;")
+    status,_=rpc('record_search',{'p_operation':'Comprar','p_type':'Casas','p_zone':'castilla','p_results':'0'},None)
+    record('anonymous aggregated search is counted',status in (200,204) and searches()=='1',http=status)
+    status,_=rpc('record_search',{'p_operation':'Comprar','p_type':'Casas','p_zone':'mi casa en la calle 5','p_results':'0'},None)
+    status2,_=rpc('record_search',{'p_operation':'Vender','p_type':'Casas','p_zone':'piura','p_results':'0'},None)
+    record('free text and unknown values are ignored',status in (200,204) and status2 in (200,204) and searches()=='1')
 
 def account_deletion():
     """Fase 2: baja de cuenta solo sin anuncios; borra perfil y usuario."""

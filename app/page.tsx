@@ -9,6 +9,7 @@ import { Listing, compactLocation, comparisonAttributes, filterAndSortListings, 
 import SiteHeader from "./components/SiteHeader";
 import PropertyContactActions from "./components/PropertyContactActions";
 import ListingViewBeacon from "./components/ListingViewBeacon";
+import { trackSearch } from "./lib/listing-events";
 
 const PiuraMap = dynamic(() => import("./PiuraMap"), { ssr: false });
 
@@ -98,6 +99,12 @@ export default function Home() {
   }, [selected, galleryOpen, closeDrawer]);
 
   const filtered = useMemo(() => filterAndSortListings(allListings, query, operation, type, sort), [allListings, query, operation, type, sort]);
+  // Aggregated demand signal (no free text leaves the browser): once the filters settle for 1.5 s.
+  useEffect(() => {
+    if (inventoryState !== "success") return;
+    const timer = window.setTimeout(() => trackSearch(operation, type, query, filtered.length), 1500);
+    return () => window.clearTimeout(timer);
+  }, [inventoryState, operation, type, query, filtered.length]);
   useEffect(() => {
     if (selected && !filtered.some(item => item.id === selected.id)) setSelected(null);
   }, [filtered, selected]);
