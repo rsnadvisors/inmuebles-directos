@@ -71,3 +71,15 @@ describe("Mis propiedades (panel)", () => {
     expect(screen.getByRole("alert").textContent).toContain("No pudimos cargar tus propiedades");
   });
 });
+
+describe("barra superior del móvil", () => {
+  it("usa el verde de «Inmuebles» del sitio y el avatar no abre ningún menú", async () => {
+    const { readFileSync } = await import("node:fs");
+    const css = readFileSync("app/components/account/account.css", "utf8");
+    expect(css).toMatch(/\.acct-topbar\{[^}]*background:#087f70/);
+    expect(readFileSync("app/globals.css", "utf8")).toMatch(/--teal:#087f70/);
+    render(await MyProperties());
+    expect(document.querySelector(".acct-topbar button")).toBeNull();
+    expect(document.querySelector(".acct-topbar .acct-avatar")?.getAttribute("aria-hidden")).toBe("true");
+  });
+});
