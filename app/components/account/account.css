@@ -103,7 +103,9 @@
 @media(max-width:800px){
   .acct{display:block;padding-bottom:calc(76px + env(safe-area-inset-bottom))}
   .acct-side{display:none}
-  .acct-topbar{display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:20;padding:12px 16px;background:var(--deep)}
+  /* Mismo verde que «Inmuebles» en la barra del sitio público (--teal #087f70). */
+  .acct-topbar{display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:20;padding:12px 16px;background:#087f70}
+  .acct-topbar .acct-brand span{color:#d4f7ec}
   .acct-topbar .acct-brand{padding:0;font-size:19px}
   .acct-topbar .acct-avatar{width:36px;height:36px;font-size:13px}
   .acct-main{padding:22px 16px 32px}
@@ -151,17 +153,5 @@
 .acct-delete-form label{display:grid;gap:6px;font-size:14px}.acct-delete-form input{padding:10px 12px;border:1px solid var(--line);border-radius:10px;font:inherit}
 .acct-delete-form button:disabled{opacity:.5;cursor:default}
 .acct-stats{font-size:13px;color:var(--brand-ink,#073d37);font-weight:600}
-.acct-menu{position:relative}
-.acct-menu-trigger{border:2px solid transparent;padding:0;cursor:pointer;font-family:inherit}
-.acct-menu-trigger:focus-visible,.acct-menu-trigger[aria-expanded="true"]{border-color:#fff;outline:none}
-.acct-menu-panel{position:absolute;right:0;top:calc(100% + 10px);z-index:40;width:min(300px,calc(100vw - 32px));background:#fff;color:var(--ink,#15232d);border:1px solid var(--line);border-radius:16px;box-shadow:0 14px 40px #0b2b2633;padding:8px;display:grid;gap:4px}
-.acct-menu-id{display:grid;gap:2px;padding:10px 12px 12px;border-bottom:1px solid var(--line);margin-bottom:4px;min-width:0}
-.acct-menu-id strong{font-size:15px;overflow-wrap:anywhere}.acct-menu-id small{color:var(--muted);font-size:13px;overflow-wrap:anywhere}
-.acct-menu-panel nav{display:grid}
-.acct-menu-panel nav a{display:flex;align-items:center;min-height:44px;padding:0 12px;border-radius:10px;color:var(--ink,#15232d);font-weight:600;font-size:14px}
-.acct-menu-panel nav a:hover,.acct-menu-panel nav a:focus-visible{background:var(--live-bg)}
-.acct-menu-signout{border-top:1px solid var(--line);margin-top:4px;padding-top:6px;display:grid}
-.acct-menu-signout button{min-height:44px;border:0;border-radius:10px;background:#fdeeee;color:#a12d2d;font:inherit;font-weight:800;cursor:pointer}
-.acct-menu-signout [role="alert"]{font-size:13px;color:#a12d2d;padding:6px 4px 0}
 .acct-close-question{display:grid;gap:6px;padding:10px 12px;border-radius:12px;background:var(--live-bg);margin-top:4px}
 .acct-close-question p{margin:0;font-size:13px;font-weight:700}
