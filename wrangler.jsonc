@@ -14,7 +14,12 @@
   // Public (non-secret) runtime values. NEXT_PUBLIC_* are also inlined at build time.
   "vars": {
     "NEXT_PUBLIC_SUPABASE_URL": "https://vosijgnyyyjvqpzbhtuh.supabase.co",
-    "NEXT_PUBLIC_SITE_ORIGIN": "https://inmuebles-directos.rsnadvisors.workers.dev"
+    "NEXT_PUBLIC_SITE_ORIGIN": "https://inmueblesdirectosperu.com"
   },
+  // Dominio propio (comprado en Cloudflare). www y *.workers.dev redirigen al dominio canónico (proxy.ts).
+  "routes": [
+    { "pattern": "inmueblesdirectosperu.com", "custom_domain": true },
+    { "pattern": "www.inmueblesdirectosperu.com", "custom_domain": true }
+  ],
   "observability": { "enabled": true }
 }
