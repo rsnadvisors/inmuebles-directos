@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { buildInventoryDashboardView, parseInventoryDashboardFilters, type DashboardResponses, type DashboardAudience, type DashboardMetric } from "../app/lib/analytics/inventory-dashboard-view";
 import type { InventoryQueryResult, InventoryResponse } from "../app/lib/analytics/inventory-query-contract";
 import InventoryOverview from "../app/components/analytics/InventoryOverview";
-import AccountLoading from "../app/cuenta/loading";
+import { existsSync } from "node:fs";
 import { Overview } from "../app/admin/components";
 import type { AdminSummary } from "../app/lib/admin-display";
 
@@ -117,9 +117,8 @@ describe("Phase 1 inventory presentation",()=>{
   expect(document.body.textContent).not.toMatch(/OWN_PROPERTY|PLATFORM_AGGREGATE|QUERY_FAILED|NO_DATA|inventory_total|detail_ctr|demand_supply|return_sessions|publisher|CTR|benchmark|Report Builder|WhatsApp|7 días|30 días/);
   expect(screen.getByRole("link",{name:"Consultar propiedades"}).getAttribute("href")).toBe("/mis-propiedades");
  });
- it("loading is neutral, readable and reveals no figures or identity",()=>{
-  render(<AccountLoading/>);expect(screen.getByRole("status")).toBeTruthy();
-  expect(document.body.textContent).toContain("Cargando Mi cuenta");expect(document.body.textContent).not.toMatch(/[0-9]|@|platform/);
+ it("opens Mi cuenta directly, without an intermediate loading screen",()=>{
+  expect(existsSync("app/cuenta/loading.tsx")).toBe(false);
  });
  it("uses native semantic alternatives and scoped responsive styles",()=>{
   show();expect(document.querySelectorAll("dl")).toHaveLength(4);
