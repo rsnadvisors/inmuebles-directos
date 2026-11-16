@@ -22,6 +22,7 @@ export const OWNER_ERRORS: Record<string, [number, string]> = {
   INVALID_ORDER: [409, "Las fotos cambiaron. Recarga la página e inténtalo de nuevo."],
   ADMIN_ACCOUNT: [409, "Las cuentas de administración no se pueden eliminar desde aquí."],
   LISTINGS_REMAIN: [409, "Aún quedan anuncios en tu cuenta. Vuelve a intentarlo."],
+  REVIEW_ALREADY_REQUESTED: [409, "Ya pediste una revisión de este anuncio. Te responderemos por correo."],
   PUBLICATION_PENDING: [409, "Tienes una publicación sin terminar. Ve a «Publicar» y cancélala antes de eliminar la cuenta."],
 };
 

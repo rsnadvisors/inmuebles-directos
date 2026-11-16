@@ -3,10 +3,12 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
+import ShareListing from "../ShareListing";
+import ReviewRequest from "./ReviewRequest";
 import { ACTION_CONFIRM, ACTION_LABELS, availableActions, LISTING_TTL_DAYS, type ListingAction } from "../../lib/listing-management";
 
 type Props = { id: string; title: string; slug: string; status: string; listingType: string; isReserved: boolean;
-  ownerPaused: boolean; deletionRequestedAt: string | null; publishedAt: string | null; renewedAt?: string | null; closedViaPortal?: boolean | null };
+  ownerPaused: boolean; deletionRequestedAt: string | null; publishedAt: string | null; renewedAt?: string | null; closedViaPortal?: boolean | null; siteOrigin?: string; moderationNote?: string | null; reviewRequestedAt?: string | null };
 
 const DELETE_CONFIRM = (title: string) => `Vas a eliminar definitivamente «${title}» y sus fotos. Esta acción no se puede deshacer.\n\nSi solo se vendió o alquiló, usa «Marcar como vendido/alquilado» en su lugar.\n\n¿Eliminar el anuncio?`;
 
@@ -56,7 +58,9 @@ export default function ListingActions(props: Props) {
           <button type="button" className="acct-btn acct-btn-quiet" disabled={busy} onClick={() => send({ op: "close-feedback", id: props.id, viaPortal: false })}>No, por otro medio</button>
         </div>
       </div>}
-    {moderated && <p className="acct-manage-note">Este anuncio fue archivado tras una revisión. Escríbenos si crees que es un error.</p>}
+    {props.status === "published" && !deleting && props.siteOrigin &&
+      <ShareListing compact url={`${props.siteOrigin}/inmueble/${props.slug}`} title={props.title} />}
+    {moderated && <ReviewRequest id={props.id} note={props.moderationNote ?? null} requestedAt={props.reviewRequestedAt ?? null} />}
     <p className="acct-manage-note" role="status">{message}</p>
   </div>;
 }

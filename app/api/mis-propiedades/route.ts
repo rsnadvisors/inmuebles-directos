@@ -57,6 +57,14 @@ export async function POST(request: Request): Promise<Response> {
       const result = await deleteOwnListing(client, user.id, id);
       return result.ok ? reply(200, { ok: true, deleted: true }) : ownerFailure(result.code);
     }
+    if (input.op === "review-request") {
+      const text = typeof input.message === "string" ? input.message.trim() : "";
+      if (Object.keys(input).sort().join(",") !== "id,message,op" || text.length < 10 || text.length > 500) {
+        return failure("INVALID_REQUEST", "Escribe entre 10 y 500 caracteres.", 400);
+      }
+      const { error } = await client.rpc("owner_request_review", { p_id: id, p_message: text });
+      return error ? rpcFailure(error) : reply(200, { ok: true });
+    }
     if (input.op === "close-feedback") {
       if (Object.keys(input).sort().join(",") !== "id,op,viaPortal" || typeof input.viaPortal !== "boolean") {
         return failure("INVALID_REQUEST", "No se pudo leer la solicitud.", 400);
