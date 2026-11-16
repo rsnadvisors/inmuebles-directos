@@ -437,6 +437,11 @@ def expiry_and_stats():
     status,mine=rpc('owner_listing_stats',{'p_days':30},B); record('owner sees own stats',status==200 and mine.get(listing,{}).get('view')==1,http=status)
     status,other=rpc('owner_listing_stats',{'p_days':30},A); record('other user does not see foreign stats',status==200 and listing not in other,http=status)
     status,_=rpc('owner_listing_stats',{'p_days':30},None); deny_http('anonymous cannot read stats',status)
+    status,wk=rpc('owner_listing_weekly',{'p_weeks':8},B)
+    record('owner weekly series has 8 weeks with own visit',status==200 and len(wk)==8 and sum(w['view'] for w in wk)==1,http=status)
+    status,wk=rpc('owner_listing_weekly',{'p_weeks':8},A)
+    record('other user weekly series excludes foreign listings',status==200 and sum(w['view']+w['call']+w['whatsapp'] for w in wk)==0,http=status)
+    status,_=rpc('owner_listing_weekly',{'p_weeks':8},None); deny_http('anonymous cannot read weekly stats',status)
     for uid,label in [(A,'authenticated'),(None,'anonymous')]:
         status,_=rpc('expire_stale_listings',{},uid); deny_http(label+' cannot run expiry job',status)
     q="select status||':'||owner_paused||':'||(expired_at is not null) from public.properties where id='"+listing+"';"
