@@ -196,3 +196,13 @@
 @media (max-width:900px){.acct-charts{grid-template-columns:1fr}}
 /* En escritorio ya está «Cerrar sesión» en la barra lateral; en el móvil (barra lateral oculta) se muestra en «Tu cuenta». */
 @media (min-width:801px){.acct-signout-inline{display:none}}
+/* Contactos por anuncio: título completo encima de la barra (sin recortes en el móvil) */
+.acct-bars ul{list-style:none;margin:0;padding:0;display:grid;gap:12px}
+.acct-bars li{display:grid;gap:5px;min-width:0}
+.acct-bar-title{font-size:13px;font-weight:600;line-height:1.35;overflow-wrap:anywhere}
+.acct-bar-row{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:start;gap:10px}
+.acct-bar-track{height:12px;border-radius:999px;background:#eef3f1;overflow:hidden}
+.acct-bar-fill{display:block;height:100%;border-radius:999px;background:var(--brand)}
+.acct-bar-value{font-size:12px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--ink);white-space:nowrap}
+.acct-bar-value.crit{color:#b23a3a}
+.acct-bar-scale{display:flex;justify-content:space-between;margin-top:6px;padding-right:2px;font-size:11px;color:var(--muted)}

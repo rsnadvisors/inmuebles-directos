@@ -74,7 +74,9 @@ describe("pantalla Mi cuenta", () => {
     expect(kpis.getByText("+233 % vs. 30 días anteriores")).toBeTruthy(); // 10 frente a 3
     expect(kpis.getByText((12.5).toLocaleString("es-PE"))).toBeTruthy(); // 10 de 80 visitas
     expect(screen.getByRole("img", { name: /Contactos por semana/ })).toBeTruthy();
-    expect(screen.getByRole("img", { name: /por anuncio/ }).textContent).toContain("0 · revisar");
+    const bars = screen.getByRole("img", { name: /por anuncio/ });
+    expect(bars.textContent).toContain("Casa en Castilla");          // título completo, sin recortar
+    expect(bars.textContent).toContain("0 · revisar");               // 30 días publicado y sin contactos
     expect(screen.getByText("Solo 1 foto")).toBeTruthy();
     expect(screen.getAllByRole("button", { name: "Cerrar sesión" }).length).toBe(2); // barra lateral (escritorio) y «Tu cuenta» (móvil)
   });
@@ -92,5 +94,21 @@ describe("migración de estadísticas semanales", () => {
     expect(sql).toMatch(/where p\.owner_id = uid/);
     expect(sql).toMatch(/revoke all on function public\.owner_listing_weekly\(integer\) from public, anon;/);
     expect(sql).not.toMatch(/grant [^;]* to [^;]*anon/);
+  });
+});
+
+describe("gráfico de contactos por anuncio", () => {
+  it("muestra títulos largos completos y no marca «revisar» a un anuncio recién publicado", async () => {
+    const { ListingContactsChart } = await import("../app/components/account/OwnerCharts");
+    const long = "Alquiler de departamento en Piura, Urb. Miraflores Country Club (3er piso)";
+    render(<ListingContactsChart rows={[
+      { id: "a", title: long, counts: counts({ view: 3 }), ageDays: 1 },
+      { id: "b", title: "Terreno residencial", counts: counts({ whatsapp: 2 }), ageDays: 40 },
+      { id: "c", title: "Casa antigua", counts: counts(null), ageDays: 30 },
+    ]} />);
+    expect(screen.getByText(long).getAttribute("title")).toBe(long);
+    expect(screen.getByText("0 · recién publicado")).toBeTruthy();
+    expect(screen.getByText("0 · revisar")).toBeTruthy();
+    expect(document.querySelector("svg text")).toBeNull(); // sin texto SVG que se pueda recortar
   });
 });

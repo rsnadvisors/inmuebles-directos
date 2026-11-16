@@ -48,25 +48,26 @@ export function WeeklyContactsChart({ weeks }: { weeks: Week[] }) {
   </svg>;
 }
 
-/** ¿Qué anuncio rinde y cuál necesita ayuda? Contactos de los últimos 30 días por anuncio publicado. */
-export function ListingContactsChart({ rows }: { rows: { id: string; title: string; counts: Counts }[] }) {
+/** ¿Qué anuncio rinde y cuál necesita ayuda? Barras en HTML para que los títulos largos nunca se corten:
+ * el título va completo (hasta 2 líneas) encima de su barra. «Revisar» solo con 14 días o más publicado. */
+export const QUIET_AFTER_DAYS = 14;
+export function ListingContactsChart({ rows }: { rows: { id: string; title: string; counts: Counts; ageDays: number }[] }) {
   const top = rows.slice(0, 6);
-  const W = 360, rowH = 30, L = 132, R = 316, H = top.length * rowH + 22;
   const max = niceMax(Math.max(0, ...top.map(r => contacts(r.counts))), 4);
-  const x = (v: number) => L + (v / max) * (R - L);
-  const short = (t: string) => (t.length > 22 ? `${t.slice(0, 21)}…` : t);
-  return <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Contactos de los últimos 30 días por anuncio" className="acct-chart">
-    <line x1={L} x2={L} y1={4} y2={H - 18} className="acct-chart-grid" />
-    {top.map((r, i) => {
-      const c = contacts(r.counts), y = 6 + i * rowH;
-      return <g key={r.id}>
-        <text x={L - 8} y={y + 14} textAnchor="end" className="acct-chart-label">{short(r.title)}</text>
-        {c > 0 ? <rect x={L} y={y + 4} width={Math.max(2, x(c) - L)} height="14" rx="3" className="acct-chart-a" />
-          : <rect x={L} y={y + 4} width="3" height="14" className="acct-chart-crit" />}
-        <text x={c > 0 ? x(c) + 6 : L + 10} y={y + 15} className={c > 0 ? "acct-chart-label" : "acct-chart-critlabel"}>{c > 0 ? fmt(c) : "0 · revisar"}</text>
-      </g>;
-    })}
-    <text x={L} y={H - 4} textAnchor="middle">0</text>
-    <text x={R} y={H - 4} textAnchor="middle">{fmt(max)}</text>
-  </svg>;
+  return <div className="acct-bars" role="img" aria-label="Contactos de los últimos 30 días por anuncio">
+    <ul>
+      {top.map(r => {
+        const c = contacts(r.counts);
+        const quiet = c === 0 && r.ageDays >= QUIET_AFTER_DAYS;
+        return <li key={r.id}>
+          <span className="acct-bar-row">
+            <span className="acct-bar-title" title={r.title}>{r.title}</span>
+            <span className={quiet ? "acct-bar-value crit" : "acct-bar-value"}>{fmt(c)}{c === 0 ? (quiet ? " · revisar" : " · recién publicado") : ""}</span>
+          </span>
+          <span className="acct-bar-track"><span className="acct-bar-fill" style={{ width: `${c > 0 ? Math.max(3, (c / max) * 100) : 0}%` }} /></span>
+        </li>;
+      })}
+    </ul>
+    <span className="acct-bar-scale"><span>0</span><span>{fmt(max)}</span></span>
+  </div>;
 }
