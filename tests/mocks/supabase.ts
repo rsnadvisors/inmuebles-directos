@@ -27,6 +27,8 @@ export const supabase = {
     const query: Record<string, unknown> = {};
     query.eq = vi.fn((column: string, value: unknown) => { filters.push([column, value]); return query; });
     query.maybeSingle = vi.fn(() => response(true));
+    query.order = vi.fn(() => query);
+    query.limit = vi.fn(() => query);
     query.then = (resolve: (value: Response) => unknown, reject: (reason: unknown) => unknown) => response().then(resolve, reject);
     return {
       select: vi.fn(() => query),
