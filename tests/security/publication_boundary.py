@@ -314,6 +314,7 @@ def main():
     owner_photos()
     expiry_and_stats()
     market_capture()
+    moderation_flow()
     account_deletion()
     # Antispam: at most five new attempts per owner in a rolling 24 h window (cancelled ones count).
     recent=admin("select count(*) from private.publication_attempts where owner_id='"+A+"' and created_at>now()-interval '24 hours';")
@@ -487,6 +488,22 @@ def market_capture():
     status,_=rpc('record_search',{'p_operation':'Comprar','p_type':'Casas','p_zone':'mi casa en la calle 5','p_results':'0'},None)
     status2,_=rpc('record_search',{'p_operation':'Vender','p_type':'Casas','p_zone':'piura','p_results':'0'},None)
     record('free text and unknown values are ignored',status in (200,204) and status2 in (200,204) and searches()=='1')
+
+def moderation_flow():
+    """Fase 4A: el dueño ve el motivo del archivo y pide revisión una vez; al republicar se limpia."""
+    listing=admin("select id from public.properties where owner_id='"+B+"' and status='published' order by created_at limit 1;")
+    q="select coalesce(moderation_note,'-')||'|'||(review_requested_at is not null) from public.properties where id='"+listing+"';"
+    status,_=rpc('owner_request_review',{'p_id':listing,'p_message':'Por favor revisen mi anuncio'},B); deny_http('published listing cannot request review',status)
+    admin("update public.properties set status='archived', owner_paused=false, moderation_note='Fotos de otro inmueble' where id='"+listing+"';")
+    status,_=rpc('owner_request_review',{'p_id':listing,'p_message':'corto'},B); deny_http('too short review message rejected',status)
+    status,_=rpc('owner_request_review',{'p_id':listing,'p_message':'Cambie las fotos por las reales'},A); deny_http('other user cannot request review',status)
+    status,_=rpc('owner_request_review',{'p_id':listing,'p_message':'Cambie las fotos por las reales'},B)
+    record('owner requests review of moderated listing',status==200 and admin(q)=='Fotos de otro inmueble|true'
+      and admin("select count(*) from private.review_requests where property_id='"+listing+"' and status='open';")=='1',http=status)
+    status,_=rpc('owner_request_review',{'p_id':listing,'p_message':'Otra vez, por favor revisen'},B); deny_http('only one open review request',status)
+    status,_=http('GET','review_requests?select=*',None); deny_http('review requests not exposed',status)
+    admin("update public.properties set status='published' where id='"+listing+"';")
+    record('republishing clears moderation note and request flag',admin(q)=='-|false',value=admin(q))
 
 def account_deletion():
     """Fase 2: baja de cuenta solo sin anuncios; borra perfil y usuario."""

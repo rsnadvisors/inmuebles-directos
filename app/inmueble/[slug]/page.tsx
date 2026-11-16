@@ -8,6 +8,7 @@ import PropertyMap from "./PropertyMap";
 import SiteHeader from "../../components/SiteHeader";
 import PropertyContactActions from "../../components/PropertyContactActions";
 import ListingViewBeacon from "../../components/ListingViewBeacon";
+import ShareListing from "../../components/ShareListing";
 import { TITULAR } from "../../lib/legal";
 
 type PageProps = { params: Promise<{ slug: string }> };
@@ -78,6 +79,7 @@ export default async function PropertyPage({ params }: PageProps) {
         {isMappable(property) && <section className="property-full-section"><h2>Ubicación</h2><PropertyMap property={property} /></section>}
         {date && <section className="property-full-section property-full-publication"><h2>Publicación</h2><p>Publicado el {date}</p></section>}
         <PropertyContactActions phone={property.contactPhone} title={property.title} status={property.status} listingId={property.id} /><ListingViewBeacon id={property.id} />
+        <ShareListing url={listingUrl} title={property.title} />
         <p className="property-report"><a href={reportHref} rel="nofollow">Denunciar este anuncio</a></p>
       </div>
     </article>

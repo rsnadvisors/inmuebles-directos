@@ -196,3 +196,7 @@
 @media (max-width:900px){.acct-charts{grid-template-columns:1fr}}
 /* En escritorio ya está «Cerrar sesión» en la barra lateral; en el móvil (barra lateral oculta) se muestra en «Tu cuenta». */
 @media (min-width:801px){.acct-signout-inline{display:none}}
+.acct-review{display:grid;gap:8px;padding:12px 14px;border-radius:12px;background:#f2f7fd;border-left:4px solid #2a5f9e;max-width:520px}
+.acct-review p{margin:0;font-size:13px;overflow-wrap:anywhere}.acct-review-form{display:grid;gap:8px}.acct-review-form label{font-size:13px;font-weight:700}
+.acct-review-form textarea{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:14px;resize:vertical}
+.acct-review .acct-btn{width:fit-content;font-size:13px;padding:8px 14px;cursor:pointer;font-family:inherit}
