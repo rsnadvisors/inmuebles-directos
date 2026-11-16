@@ -61,7 +61,10 @@ describe("canonical property page", () => {
     expect(screen.getByRole("img", { name: "Sin fotografías de Terreno de prueba" })).toBeTruthy();
     expect(screen.getByText("Precio no disponible")).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "Ubicación" })).toBeNull();
-    expect(screen.queryByText(/Usuario null|WhatsApp|Teléfono|Negociable/)).toBeNull();
+    expect(screen.queryByText(/Usuario null|Teléfono|Negociable/)).toBeNull();
+    // Sin teléfono no hay botones de contacto; «WhatsApp» solo aparece en «Compartir».
+    expect(screen.queryByRole("link", { name: "Contactar al anunciante por WhatsApp" })).toBeNull();
+    expect(screen.getByRole("group", { name: "Compartir este anuncio" })).toBeTruthy();
   });
 
   it("renders one image without navigation controls and uses alt text", () => {

@@ -6,6 +6,7 @@ import { resolvePropertyImage } from "../lib/property-image-source";
 import AccountShell from "../components/account/AccountShell";
 import ListingActions from "../components/account/ListingActions";
 import { daysLeft, listingExpiry, listingStatusLabel } from "../lib/listing-management";
+import { siteOrigin } from "../lib/auth-origin";
 
 export const dynamic = "force-dynamic";
 
@@ -22,7 +23,7 @@ const dateFormat = new Intl.DateTimeFormat("es-PE", { day: "numeric", month: "sh
 type Row = { id: string; title: string; slug: string; status: string; price: number; currency: string; property_type: string; listing_type: string;
   district: string | null; city: string | null; published_at: string | null; created_at: string;
   is_reserved?: boolean | null; owner_paused?: boolean | null; deletion_requested_at?: string | null;
-  renewed_at?: string | null; expired_at?: string | null; closed_via_portal?: boolean | null;
+  renewed_at?: string | null; expired_at?: string | null; closed_via_portal?: boolean | null; moderation_note?: string | null; review_requested_at?: string | null;
   property_images?: { id: string; storage_bucket: string | null; public_url: string | null; sort_order: number; is_cover: boolean }[] };
 
 function cover(row: Row): string | null {
@@ -53,7 +54,7 @@ export default async function MyProperties({ searchParams }: { searchParams?: Pr
   const [{ data: profile }, { data, error }, statsResult] = await Promise.all([
     client.from("profiles").select("full_name").eq("id", user.id).maybeSingle(),
     client.from("properties")
-      .select("id,title,slug,status,price,currency,property_type,listing_type,district,city,published_at,created_at,is_reserved,owner_paused,deletion_requested_at,renewed_at,expired_at,closed_via_portal,property_images(id,storage_bucket,public_url,sort_order,is_cover)")
+      .select("id,title,slug,status,price,currency,property_type,listing_type,district,city,published_at,created_at,is_reserved,owner_paused,deletion_requested_at,renewed_at,expired_at,closed_via_portal,moderation_note,review_requested_at,property_images(id,storage_bucket,public_url,sort_order,is_cover)")
       .eq("owner_id", user.id).order("created_at", { ascending: false }),
     // Aggregated, owner-only counters; a failure here never hides the listings.
     Promise.resolve(client.rpc("owner_listing_stats", { p_days: 30 })).catch(() => ({ data: null })),
@@ -61,6 +62,7 @@ export default async function MyProperties({ searchParams }: { searchParams?: Pr
   const stats = (statsResult?.data ?? {}) as Record<string, { view?: number | null; call?: number | null; whatsapp?: number | null }>;
   const display = typeof profile?.full_name === "string" && profile.full_name.trim() ? profile.full_name.trim() : user.email || "Mi cuenta";
   const rows = (data ?? []) as Row[];
+  const origin = siteOrigin();
   const query = await searchParams ?? {};
   const requested = query.estado;
   const updated = query.actualizado === "1";
@@ -99,7 +101,7 @@ export default async function MyProperties({ searchParams }: { searchParams?: Pr
                 </div>
                 <div className="acct-row-actions">
                   <ListingActions id={row.id} title={row.title} slug={row.slug} status={row.status} listingType={row.listing_type}
-                    isReserved={!!row.is_reserved} ownerPaused={!!row.owner_paused} deletionRequestedAt={row.deletion_requested_at ?? null} publishedAt={row.published_at} renewedAt={row.renewed_at ?? null} closedViaPortal={row.closed_via_portal ?? null} />
+                    isReserved={!!row.is_reserved} ownerPaused={!!row.owner_paused} deletionRequestedAt={row.deletion_requested_at ?? null} publishedAt={row.published_at} renewedAt={row.renewed_at ?? null} closedViaPortal={row.closed_via_portal ?? null} siteOrigin={origin} moderationNote={row.moderation_note ?? null} reviewRequestedAt={row.review_requested_at ?? null} />
                 </div>
               </li>;
             })}
