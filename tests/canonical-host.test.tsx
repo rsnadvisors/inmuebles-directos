@@ -19,5 +19,7 @@ describe("dominio canónico", () => {
     expect(w).toMatch(/"NEXT_PUBLIC_SITE_ORIGIN": "https:\/\/inmueblesdirectosperu\.com"/);
     expect(w).toMatch(/"pattern": "inmueblesdirectosperu\.com", "custom_domain": true/);
     expect(w).toMatch(/"pattern": "www\.inmueblesdirectosperu\.com", "custom_domain": true/);
+    // workers.dev debe seguir activo para redirigir los enlaces antiguos (wrangler lo desactiva si falta).
+    expect(w).toMatch(/"workers_dev": true/);
   });
 });

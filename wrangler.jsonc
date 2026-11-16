@@ -17,6 +17,9 @@
     "NEXT_PUBLIC_SITE_ORIGIN": "https://inmueblesdirectosperu.com"
   },
   // Dominio propio (comprado en Cloudflare). www y *.workers.dev redirigen al dominio canónico (proxy.ts).
+  // workers.dev sigue activo solo para redirigir los enlaces antiguos al dominio propio.
+  "workers_dev": true,
+  "preview_urls": false,
   "routes": [
     { "pattern": "inmueblesdirectosperu.com", "custom_domain": true },
     { "pattern": "www.inmueblesdirectosperu.com", "custom_domain": true }
