@@ -163,3 +163,5 @@
 .acct-menu-signout{border-top:1px solid var(--line);margin-top:4px;padding-top:6px;display:grid}
 .acct-menu-signout button{min-height:44px;border:0;border-radius:10px;background:#fdeeee;color:#a12d2d;font:inherit;font-weight:800;cursor:pointer}
 .acct-menu-signout [role="alert"]{font-size:13px;color:#a12d2d;padding:6px 4px 0}
+.acct-close-question{display:grid;gap:6px;padding:10px 12px;border-radius:12px;background:var(--live-bg);margin-top:4px}
+.acct-close-question p{margin:0;font-size:13px;font-weight:700}

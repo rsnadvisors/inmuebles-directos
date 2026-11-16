@@ -6,7 +6,7 @@ import { useRef, useState } from "react";
 import { ACTION_CONFIRM, ACTION_LABELS, availableActions, LISTING_TTL_DAYS, type ListingAction } from "../../lib/listing-management";
 
 type Props = { id: string; title: string; slug: string; status: string; listingType: string; isReserved: boolean;
-  ownerPaused: boolean; deletionRequestedAt: string | null; publishedAt: string | null; renewedAt?: string | null };
+  ownerPaused: boolean; deletionRequestedAt: string | null; publishedAt: string | null; renewedAt?: string | null; closedViaPortal?: boolean | null };
 
 const DELETE_CONFIRM = (title: string) => `Vas a eliminar definitivamente «${title}» y sus fotos. Esta acción no se puede deshacer.\n\nSi solo se vendió o alquiló, usa «Marcar como vendido/alquilado» en su lugar.\n\n¿Eliminar el anuncio?`;
 
@@ -31,7 +31,7 @@ export default function ListingActions(props: Props) {
         if (response.status === 401) window.location.assign("/login?returnTo=/mis-propiedades");
         return;
       }
-      setMessage(body.op === "delete" ? "Anuncio eliminado." : body.action === "renew" ? `Renovado: seguirá publicado otros ${LISTING_TTL_DAYS} días.` : "Cambios guardados.");
+      setMessage(body.op === "delete" ? "Anuncio eliminado." : body.action === "renew" ? `Renovado: seguirá publicado otros ${LISTING_TTL_DAYS} días.` : body.op === "close-feedback" ? "¡Gracias por contarnos!" : "Cambios guardados.");
       router.refresh();
     } catch {
       setMessage("No pudimos conectar con el servidor. Inténtalo de nuevo.");
@@ -48,6 +48,14 @@ export default function ListingActions(props: Props) {
       {canDelete && <button type="button" className="acct-btn acct-btn-danger" disabled={busy}
         onClick={() => send({ op: "delete", id: props.id }, deleting ? undefined : DELETE_CONFIRM(props.title))}>{deleting ? "Reintentar eliminación" : "Eliminar"}</button>}
     </div>
+    {(props.status === "sold" || props.status === "rented") && (props.closedViaPortal === null || props.closedViaPortal === undefined) &&
+      <div className="acct-close-question" role="group" aria-label="Pregunta sobre el cierre">
+        <p>¿Lo {props.status === "sold" ? "vendiste" : "alquilaste"} gracias a Inmuebles Directos?</p>
+        <div className="acct-manage-buttons">
+          <button type="button" className="acct-btn acct-btn-quiet" disabled={busy} onClick={() => send({ op: "close-feedback", id: props.id, viaPortal: true })}>Sí</button>
+          <button type="button" className="acct-btn acct-btn-quiet" disabled={busy} onClick={() => send({ op: "close-feedback", id: props.id, viaPortal: false })}>No, por otro medio</button>
+        </div>
+      </div>}
     {moderated && <p className="acct-manage-note">Este anuncio fue archivado tras una revisión. Escríbenos si crees que es un error.</p>}
     <p className="acct-manage-note" role="status">{message}</p>
   </div>;

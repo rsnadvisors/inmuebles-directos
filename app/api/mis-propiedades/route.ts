@@ -57,6 +57,13 @@ export async function POST(request: Request): Promise<Response> {
       const result = await deleteOwnListing(client, user.id, id);
       return result.ok ? reply(200, { ok: true, deleted: true }) : ownerFailure(result.code);
     }
+    if (input.op === "close-feedback") {
+      if (Object.keys(input).sort().join(",") !== "id,op,viaPortal" || typeof input.viaPortal !== "boolean") {
+        return failure("INVALID_REQUEST", "No se pudo leer la solicitud.", 400);
+      }
+      const { error } = await client.rpc("owner_set_close_feedback", { p_id: id, p_via_portal: input.viaPortal });
+      return error ? rpcFailure(error) : reply(200, { ok: true });
+    }
     if (input.op === "image-remove") {
       if (Object.keys(input).sort().join(",") !== "id,imageId,op" || typeof input.imageId !== "string" || !IMAGE_ID.test(input.imageId)) {
         return failure("INVALID_REQUEST", "No se pudo leer la solicitud.", 400);
