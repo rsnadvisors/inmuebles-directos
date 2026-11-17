@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { FormEvent, useRef, useState } from "react";
-import { MAX_PRICE, validatePhotos, validatePublication, validCoordinates } from "../lib/publication";
+import { MAX_PRICE, roundCoordinate, validatePhotos, validatePublication, validCoordinates } from "../lib/publication";
 import SiteHeader from "../components/SiteHeader";
 import { publicationFingerprint } from "../lib/publication-attempt";
 import { PublicationRecoveryPanel, usePublicationRecovery } from "./PublicationRecovery";
@@ -10,6 +11,9 @@ import Turnstile, { type TurnstileHandle } from "../components/Turnstile";
 import { TURNSTILE_HEADER, TURNSTILE_MISSING_MESSAGE } from "../lib/turnstile";
 
 const initialCoordinates = { latitude: "", longitude: "" };
+// Leaflet necesita el navegador: el mapa se carga solo en el cliente.
+const LocationPicker = dynamic(() => import("./LocationPicker"), { ssr: false,
+  loading: () => <div className="location-picker location-picker-loading">Cargando mapa…</div> });
 export default function PublishPage() {
   const recovery = usePublicationRecovery();
   const [status, setStatus] = useState("");
@@ -41,6 +45,14 @@ export default function PublishPage() {
     setCoordinatesConfirmed(valid);
     setStatus(valid ? "Coordenadas confirmadas." : "Indica coordenadas válidas dentro del área de Perú.");
   }
+  // Mover el pin (arrastrar o tocar el mapa) fija y confirma la ubicación en un solo gesto.
+  function pickOnMap(lat: number, lng: number) {
+    locationVersion.current++;
+    const next = { latitude: String(roundCoordinate(lat)), longitude: String(roundCoordinate(lng)) };
+    const valid = validCoordinates(next.latitude, next.longitude);
+    if (!valid) { setCoordinatesConfirmed(false); setStatus("Ese punto está fuera del área permitida. Fija la ubicación dentro de Perú."); return; }
+    setCoords(next); setCoordinatesConfirmed(true); setStatus("");
+  }
   function useLocation() {
     const version = ++locationVersion.current;
     setCoordinatesConfirmed(false);
@@ -48,7 +60,7 @@ export default function PublishPage() {
     setStatus("Obteniendo ubicación…");
     navigator.geolocation.getCurrentPosition(({ coords: p }) => {
       if (version !== locationVersion.current) return;
-      const next = { latitude: String(p.latitude), longitude: String(p.longitude) };
+      const next = { latitude: String(roundCoordinate(p.latitude)), longitude: String(roundCoordinate(p.longitude)) };
       setCoords(next);
       const valid = validCoordinates(next.latitude, next.longitude);
       setCoordinatesConfirmed(valid);
@@ -78,6 +90,7 @@ export default function PublishPage() {
       payload.set("longitude", coords.longitude);
       payload.set("coordinatesConfirmed", String(coordinatesConfirmed));
       files.forEach(file => payload.append("images", file));
+      if (!coords.latitude && !coords.longitude) { setStatus("Fija la ubicación del inmueble en el mapa."); return; }
       let input: ReturnType<typeof validatePublication>;
       try { input = validatePublication(payload); }
       catch (error) { setStatus((error as Error).message); return; }
@@ -144,11 +157,20 @@ export default function PublishPage() {
       <fieldset disabled={isSubmitting}><legend>Características</legend><div className="publication-field-row"><label>Área total (m²)<input name="area_total_m2" type="number" min="0" step="any" /></label>{propertyType !== "Terrenos" && <label>Área construida (m²)<input name="area_built_m2" type="number" min="0" step="any" /></label>}</div>
         {propertyType !== "Terrenos" && <div className="publication-field-row">{propertyType !== "Oficinas" && propertyType !== "Locales comerciales" && <label>Habitaciones<input name="bedrooms" type="number" min="0" step="1" /></label>}<label>Baños<input name="bathrooms" type="number" min="0" step="1" /></label><label>Estacionamientos<input name="parking_spaces" type="number" min="0" step="1" /></label><label>Pisos<input name="floors" type="number" min="0" step="1" /></label><label>Mantenimiento<input name="maintenance_fee" type="number" min="0" step="any" /></label></div>}
       </fieldset>
-      <fieldset disabled={isSubmitting}><legend>Ubicación de coordenadas</legend>
-        <div className="coordinate-grid"><label>Latitud<input value={coords.latitude} onChange={e => editCoordinate("latitude", e.target.value)} inputMode="decimal" required /></label><label>Longitud<input value={coords.longitude} onChange={e => editCoordinate("longitude", e.target.value)} inputMode="decimal" required /></label></div>
+      <fieldset disabled={isSubmitting} className="location-fieldset"><legend>Ubicación del inmueble</legend>
+        <p className="location-hint">Arrastra el puntero para fijar el punto en el mapa. También puedes tocar el mapa.</p>
+        <LocationPicker value={coordinatesConfirmed && validCoordinates(coords.latitude, coords.longitude) ? { lat: Number(coords.latitude), lng: Number(coords.longitude) } : null}
+          onPick={pickOnMap} disabled={isSubmitting} />
+        <p className={coordinatesConfirmed ? "location-state ok" : "location-state"} aria-live="polite">{coordinatesConfirmed
+          ? `Ubicación fijada: ${coords.latitude}, ${coords.longitude}`
+          : "Coordenadas sin confirmar: fija el punto en el mapa o usa tu ubicación actual."}</p>
         <button type="button" className="location-btn" onClick={useLocation}>Usar mi ubicación actual</button>
-        <button type="button" className="location-btn" onClick={confirmCoordinates}>Confirmar coordenadas</button>
-        <small>{coordinatesConfirmed ? "Coordenadas confirmadas." : "Coordenadas sin confirmar. Obtén tu ubicación o confirma manualmente la ubicación en Perú."}</small>
+        <details className="location-manual">
+          <summary>Escribir coordenadas</summary>
+          <div className="coordinate-grid"><label>Latitud<input value={coords.latitude} onChange={e => editCoordinate("latitude", e.target.value)} inputMode="decimal" placeholder="-5.194500" /></label><label>Longitud<input value={coords.longitude} onChange={e => editCoordinate("longitude", e.target.value)} inputMode="decimal" placeholder="-80.632800" /></label></div>
+          <button type="button" className="location-btn" onClick={confirmCoordinates}>Confirmar coordenadas</button>
+        </details>
+        <small>Este punto se mostrará en el mapa público de tu anuncio.</small>
       </fieldset>
       <label>Fotos de la propiedad<input type="file" accept="image/jpeg,image/png,image/webp" multiple required disabled={isSubmitting} onChange={onFiles} /><small>Obligatorio: 1 a 5 fotos · JPG, PNG o WebP · máximo 5 MiB por foto.</small>{files.length > 0 && <small>{files.length} foto(s) seleccionada(s).</small>}</label>
       <Turnstile ref={captcha} action="publish" />
