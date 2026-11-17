@@ -38,6 +38,15 @@ function optionalNumber(form: FormData, key: string, maximum: number, integer = 
 // map clicks yield 16–17 significant digits that Postgres prints with 15, so the snapshot never matched.
 // 6 decimals (~11 cm) round-trip exactly and are far finer than any listing needs.
 export const roundCoordinate = (value: number) => Math.round(value * 1e6) / 1e6;
+// «-5.1945, -80.6328» tal como lo copia Google Maps (también separadas por espacio o punto y coma, o entre paréntesis).
+const PASTED_COORDINATES = /^\s*\(?\s*(-?\d{1,3}(?:\.\d+)?)\s*[,;\s]\s*(-?\d{1,3}(?:\.\d+)?)\s*\)?\s*$/;
+/** Coordenadas pegadas → { latitude, longitude } redondeadas a 6 decimales y dentro de Perú, o null. */
+export function parsePastedCoordinates(text: string): { latitude: string; longitude: string } | null {
+  const match = PASTED_COORDINATES.exec(text);
+  if (!match) return null;
+  const next = { latitude: String(roundCoordinate(Number(match[1]))), longitude: String(roundCoordinate(Number(match[2]))) };
+  return validCoordinates(next.latitude, next.longitude) ? next : null;
+}
 export function validCoordinates(latitude: string, longitude: string): boolean {
   const lat = number(latitude), lng = number(longitude);
   // Geographic bounding box, not proof that the point lies within national borders.

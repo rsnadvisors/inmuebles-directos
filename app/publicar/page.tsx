@@ -3,7 +3,7 @@
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { FormEvent, useRef, useState } from "react";
-import { MAX_PRICE, roundCoordinate, validatePhotos, validatePublication, validCoordinates } from "../lib/publication";
+import { MAX_PRICE, parsePastedCoordinates, roundCoordinate, validatePhotos, validatePublication, validCoordinates } from "../lib/publication";
 import SiteHeader from "../components/SiteHeader";
 import { publicationFingerprint } from "../lib/publication-attempt";
 import { PublicationRecoveryPanel, usePublicationRecovery } from "./PublicationRecovery";
@@ -11,8 +11,6 @@ import Turnstile, { type TurnstileHandle } from "../components/Turnstile";
 import { TURNSTILE_HEADER, TURNSTILE_MISSING_MESSAGE } from "../lib/turnstile";
 
 const initialCoordinates = { latitude: "", longitude: "" };
-// «-5.1945, -80.6328» tal como lo copia Google Maps (también separadas por espacio o punto y coma).
-const PASTED_COORDINATES = /^\s*\(?\s*(-?\d{1,3}(?:\.\d+)?)\s*[,;\s]\s*(-?\d{1,3}(?:\.\d+)?)\s*\)?\s*$/;
 const asText = (c: { latitude: string; longitude: string }) => c.latitude && c.longitude ? `${c.latitude}, ${c.longitude}` : "";
 // Leaflet necesita el navegador: el mapa se carga solo en el cliente.
 const LocationPicker = dynamic(() => import("./LocationPicker"), { ssr: false,
@@ -42,9 +40,8 @@ export default function PublishPage() {
   function pasteCoordinates(text: string) {
     locationVersion.current++;
     setCoordText(text);
-    const match = PASTED_COORDINATES.exec(text);
-    const next = match ? { latitude: String(roundCoordinate(Number(match[1]))), longitude: String(roundCoordinate(Number(match[2]))) } : null;
-    if (next && validCoordinates(next.latitude, next.longitude)) { setCoords(next); setCoordinatesConfirmed(true); setStatus(""); return; }
+    const next = parsePastedCoordinates(text);
+    if (next) { setCoords(next); setCoordinatesConfirmed(true); setStatus(""); return; }
     setCoords(initialCoordinates); setCoordinatesConfirmed(false);
   }
   // Mover el pin (arrastrar o tocar el mapa) fija y confirma la ubicación en un solo gesto.
