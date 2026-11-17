@@ -67,14 +67,22 @@ ABSENT permits one INSERT to the SAME path with upsert=false. INACCESSIBLE,
 timeout, malformed response or unknown result fails closed. A conflict/lost
 upload response causes readback, not overwrite or another path/slot.
 
-`POST /api/publicar/cancelar` accepts only `{requestId, action:'cancel'|'reconcile'}`,
+`POST /api/publicar/cancelar` accepts only `{requestId, action:'cancel'|'reconcile'|'inspect'}`,
 with verified session, same Origin and a 1 KiB counted body. ACTIVE reconcile is
 read-only. Cancel first confirms signed `begin_cancel`, freezing all slots into
 RETIRED and retaining P=1. Then user-context Storage API removes all exact paths
 outside DB locks. Signed `close_cancel` requires confirmed API cleanup and an
 independent DB absence recheck, removes only the own unpublished public rows,
 marks CANCELLED and releases P atomically. Failure/UNKNOWN retains pending quota.
-Repeated pending cancellation is idempotent. FINALIZED cancellation is denied.
+Repeated pending cancellation is idempotent.
+`inspect` (added 2026-11-16) is strictly read-only at every state: one signed
+inspect RPC, never begin/close cancel and never Storage. It may add the caller's
+own listing title (RLS read; omitted on any failure). /publicar issues exactly one
+automatic `inspect` when it mounts with a valid local reference, so the owner sees
+what happened without pressing a button; retry, discard (`cancel`) and finishing a
+pending discard (`reconcile`) remain explicit owner actions, and nothing is ever
+resubmitted automatically. Mis propiedades offers «Descartar borrador», which is
+the same server-verified `cancel`. FINALIZED cancellation is denied.
 Terminal cancellation can only clean residual exact tombstone objects.
 
 Cleanup RLS adds owner-only exact RETIRED path SELECT/DELETE for pending/cancelled
