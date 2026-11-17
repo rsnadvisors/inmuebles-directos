@@ -1,9 +1,14 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { FormEvent, useRef, useState } from "react";
 import { EDITABLE_KEYS, ListingValidationError, validateListingEdit } from "../../lib/listing-management";
-import { MAX_PRICE } from "../../lib/publication";
+import { MAX_PRICE, parsePastedCoordinates, roundCoordinate, validCoordinates } from "../../lib/publication";
+
+// El mismo mapa con pin de /publicar; Leaflet necesita el navegador.
+const LocationPicker = dynamic(() => import("../../publicar/LocationPicker"), { ssr: false,
+  loading: () => <div className="location-picker location-picker-loading">Cargando mapa…</div> });
 
 export type EditListingInitial = {
   id: string; title: string; property_type: string; listing_type: string; price: number; currency: string; contact_phone: string | null;
@@ -15,14 +20,41 @@ const TYPE: Record<string, string> = { house: "Casa", apartment: "Departamento",
 const v = (value: unknown) => value === null || value === undefined ? "" : String(value);
 /** Muestra +51 987 654 321 como 987 654 321 para que el campo sea familiar; la validación vuelve a normalizarlo. */
 const phone = (value: string | null) => value?.startsWith("+519") && value.length === 12 ? value.slice(3) : value ?? "";
+type Point = { latitude: string; longitude: string };
+const pointOf = (lat: number | null, lng: number | null): Point | null =>
+  lat !== null && lng !== null && validCoordinates(String(lat), String(lng)) ? { latitude: String(lat), longitude: String(lng) } : null;
 
 export default function EditListingForm({ initial }: { initial: EditListingInitial }) {
   const router = useRouter();
   const pending = useRef(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const [point, setPoint] = useState<Point | null>(() => pointOf(initial.lat, initial.lng));
+  const [coordText, setCoordText] = useState(() => { const p = pointOf(initial.lat, initial.lng); return p ? `${p.latitude}, ${p.longitude}` : ""; });
+  const [locationNote, setLocationNote] = useState("");
   const land = initial.property_type === "land";
   const noRooms = land || initial.property_type === "office" || initial.property_type === "commercial";
+
+  function place(next: Point | null, note = "") {
+    setPoint(next); setLocationNote(note);
+    if (next) setCoordText(`${next.latitude}, ${next.longitude}`);
+  }
+  function pickOnMap(lat: number, lng: number) {
+    const next = { latitude: String(roundCoordinate(lat)), longitude: String(roundCoordinate(lng)) };
+    if (validCoordinates(next.latitude, next.longitude)) place(next);
+    else setLocationNote("Ese punto está fuera del área permitida. Fija la ubicación dentro de Perú.");
+  }
+  function locate() {
+    if (!navigator.geolocation) { setLocationNote("Este navegador no admite geolocalización."); return; }
+    setLocationNote("Obteniendo ubicación…");
+    navigator.geolocation.getCurrentPosition(({ coords }) => pickOnMap(coords.latitude, coords.longitude),
+      () => setLocationNote("No pudimos obtener tu ubicación. Mueve el pin hasta tu inmueble."), { enableHighAccuracy: true, timeout: 10000 });
+  }
+  function pasteCoordinates(text: string) {
+    setCoordText(text);
+    const next = parsePastedCoordinates(text);
+    if (next) { setPoint(next); setLocationNote(""); } else setPoint(null);
+  }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -31,6 +63,7 @@ export default function EditListingForm({ initial }: { initial: EditListingIniti
     const raw: Record<string, unknown> = {};
     for (const key of EDITABLE_KEYS) if (form.has(key)) raw[key] = form.get(key);
     let fields;
+    if (!point) { setMessage("Fija la ubicación del inmueble en el mapa."); return; }
     try { fields = validateListingEdit(raw, initial.property_type); }
     catch (error) { setMessage(error instanceof ListingValidationError ? error.message : "Revisa los datos."); return; }
     pending.current = true; setBusy(true); setMessage("Guardando…");
@@ -79,12 +112,21 @@ export default function EditListingForm({ initial }: { initial: EditListingIniti
         <label>Mantenimiento<input name="maintenance_fee" type="number" min="0" step="any" defaultValue={v(initial.maintenance_fee)} /></label>
       </div>}
     </fieldset>
-    <fieldset disabled={busy}><legend>Coordenadas</legend>
-      <div className="coordinate-grid">
-        <label>Latitud<input name="lat" inputMode="decimal" required defaultValue={v(initial.lat)} /></label>
-        <label>Longitud<input name="lng" inputMode="decimal" required defaultValue={v(initial.lng)} /></label>
-      </div>
-      <small>Solo cámbialas si la ubicación en el mapa es incorrecta. Deben estar dentro del área de Perú.</small>
+    <fieldset disabled={busy} className="location-fieldset"><legend>Ubicación del inmueble</legend>
+      <p className="location-hint">Arrastra el puntero para fijar el punto en el mapa.</p>
+      <small className="location-sub">También puedes tocar el mapa. Si la ubicación ya es correcta, no hace falta cambiarla.</small>
+      <LocationPicker value={point ? { lat: Number(point.latitude), lng: Number(point.longitude) } : null} onPick={pickOnMap} onLocate={locate} disabled={busy} />
+      <p className={point ? "location-state ok" : "location-state"} aria-live="polite">{point
+        ? `✓ Ubicación fijada: ${point.latitude}, ${point.longitude}` : "Ubicación sin fijar: mueve el pin hasta tu inmueble."}</p>
+      {locationNote && <p className="location-state" role="alert">{locationNote}</p>}
+      <input type="hidden" name="lat" value={point?.latitude ?? ""} />
+      <input type="hidden" name="lng" value={point?.longitude ?? ""} />
+      <details className="location-manual">
+        <summary>¿Tienes las coordenadas? Pégalas aquí</summary>
+        <label>Coordenadas<input value={coordText} onChange={e => pasteCoordinates(e.target.value)} inputMode="decimal" autoComplete="off" placeholder="-5.1945, -80.6328" /></label>
+        <small>{coordText.trim() && !point ? "Escríbelas así: -5.1945, -80.6328 (latitud, longitud, dentro de Perú)." : "En Google Maps, mantén presionado el lugar y copia los números que aparecen."}</small>
+      </details>
+      <small>Este punto se mostrará en el mapa público de tu anuncio.</small>
     </fieldset>
     <button className="publish-submit" type="submit" disabled={busy}>{busy ? "Guardando…" : "Guardar cambios"}</button>
     <p className="form-status" role="status">{message}</p>
