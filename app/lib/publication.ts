@@ -34,6 +34,10 @@ function optionalNumber(form: FormData, key: string, maximum: number, integer = 
   if (!Number.isFinite(parsed) || parsed < 0 || parsed > maximum || (integer && !Number.isInteger(parsed))) invalid(`Revisa el campo ${key}: debe ser un número válido no negativo.`);
   return parsed;
 }
+// properties.lat/lng are float8 and the boundary compares the stored row with the signed fields;
+// map clicks yield 16–17 significant digits that Postgres prints with 15, so the snapshot never matched.
+// 6 decimals (~11 cm) round-trip exactly and are far finer than any listing needs.
+export const roundCoordinate = (value: number) => Math.round(value * 1e6) / 1e6;
 export function validCoordinates(latitude: string, longitude: string): boolean {
   const lat = number(latitude), lng = number(longitude);
   // Geographic bounding box, not proof that the point lies within national borders.
@@ -74,5 +78,5 @@ export function validatePublication(form: FormData) {
   if (images.some(file => !(file instanceof File))) invalid("Las fotos recibidas no son válidas.");
   const files = images as File[];
   validatePhotos(files);
-  return { title, description, address, district, city, region, contact_phone, listing_type: operations[operation as keyof typeof operations], property_type: types[type as keyof typeof types], price, currency, area_total_m2, area_built_m2, bedrooms, bathrooms, parking_spaces, floors, maintenance_fee, lat: number(latitude), lng: number(longitude), files };
+  return { title, description, address, district, city, region, contact_phone, listing_type: operations[operation as keyof typeof operations], property_type: types[type as keyof typeof types], price, currency, area_total_m2, area_built_m2, bedrooms, bathrooms, parking_spaces, floors, maintenance_fee, lat: roundCoordinate(number(latitude)), lng: roundCoordinate(number(longitude)), files };
 }
