@@ -11,6 +11,9 @@ import Turnstile, { type TurnstileHandle } from "../components/Turnstile";
 import { TURNSTILE_HEADER, TURNSTILE_MISSING_MESSAGE } from "../lib/turnstile";
 
 const initialCoordinates = { latitude: "", longitude: "" };
+// «-5.1945, -80.6328» tal como lo copia Google Maps (también separadas por espacio o punto y coma).
+const PASTED_COORDINATES = /^\s*\(?\s*(-?\d{1,3}(?:\.\d+)?)\s*[,;\s]\s*(-?\d{1,3}(?:\.\d+)?)\s*\)?\s*$/;
+const asText = (c: { latitude: string; longitude: string }) => c.latitude && c.longitude ? `${c.latitude}, ${c.longitude}` : "";
 // Leaflet necesita el navegador: el mapa se carga solo en el cliente.
 const LocationPicker = dynamic(() => import("./LocationPicker"), { ssr: false,
   loading: () => <div className="location-picker location-picker-loading">Cargando mapa…</div> });
@@ -19,6 +22,7 @@ export default function PublishPage() {
   const [status, setStatus] = useState("");
   const [coords, setCoords] = useState(initialCoordinates);
   const [coordinatesConfirmed, setCoordinatesConfirmed] = useState(false);
+  const [coordText, setCoordText] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [propertyType, setPropertyType] = useState("Casas");
   const [publishedSlug, setPublishedSlug] = useState<string | null>(null);
@@ -30,20 +34,18 @@ export default function PublishPage() {
   function resetPublicationForm() {
     locationVersion.current++;
     formRef.current?.reset();
-    setFiles([]); setCoords(initialCoordinates); setCoordinatesConfirmed(false);
+    setFiles([]); setCoords(initialCoordinates); setCoordinatesConfirmed(false); setCoordText("");
     setPropertyType("Casas"); setPublishedSlug(null); setStatus("");
   }
 
-  function editCoordinate(key: keyof typeof coords, value: string) {
+  // Pegar o escribir «lat, lng» fija el pin en cuanto el texto es válido; si no, la ubicación queda sin fijar.
+  function pasteCoordinates(text: string) {
     locationVersion.current++;
-    setCoords(previous => ({ ...previous, [key]: value }));
-    setCoordinatesConfirmed(false);
-  }
-  function confirmCoordinates() {
-    locationVersion.current++;
-    const valid = validCoordinates(coords.latitude, coords.longitude);
-    setCoordinatesConfirmed(valid);
-    setStatus(valid ? "Coordenadas confirmadas." : "Indica coordenadas válidas dentro del área de Perú.");
+    setCoordText(text);
+    const match = PASTED_COORDINATES.exec(text);
+    const next = match ? { latitude: String(roundCoordinate(Number(match[1]))), longitude: String(roundCoordinate(Number(match[2]))) } : null;
+    if (next && validCoordinates(next.latitude, next.longitude)) { setCoords(next); setCoordinatesConfirmed(true); setStatus(""); return; }
+    setCoords(initialCoordinates); setCoordinatesConfirmed(false);
   }
   // Mover el pin (arrastrar o tocar el mapa) fija y confirma la ubicación en un solo gesto.
   function pickOnMap(lat: number, lng: number) {
@@ -51,7 +53,7 @@ export default function PublishPage() {
     const next = { latitude: String(roundCoordinate(lat)), longitude: String(roundCoordinate(lng)) };
     const valid = validCoordinates(next.latitude, next.longitude);
     if (!valid) { setCoordinatesConfirmed(false); setStatus("Ese punto está fuera del área permitida. Fija la ubicación dentro de Perú."); return; }
-    setCoords(next); setCoordinatesConfirmed(true); setStatus("");
+    setCoords(next); setCoordText(asText(next)); setCoordinatesConfirmed(true); setStatus("");
   }
   function useLocation() {
     const version = ++locationVersion.current;
@@ -61,12 +63,12 @@ export default function PublishPage() {
     navigator.geolocation.getCurrentPosition(({ coords: p }) => {
       if (version !== locationVersion.current) return;
       const next = { latitude: String(roundCoordinate(p.latitude)), longitude: String(roundCoordinate(p.longitude)) };
-      setCoords(next);
+      setCoords(next); setCoordText(asText(next));
       const valid = validCoordinates(next.latitude, next.longitude);
       setCoordinatesConfirmed(valid);
-      setStatus(valid ? "Ubicación obtenida y confirmada." : "La ubicación obtenida está fuera del área de publicación permitida.");
+      setStatus(valid ? "" : "La ubicación obtenida está fuera del área de publicación permitida.");
     }, () => {
-      if (version === locationVersion.current) setStatus("No se pudo obtener la ubicación. Puedes introducirla manualmente.");
+      if (version === locationVersion.current) setStatus("No pudimos obtener tu ubicación. Mueve el pin hasta tu inmueble.");
     }, { enableHighAccuracy: true, timeout: 10000 });
   }
   function onFiles(event: React.ChangeEvent<HTMLInputElement>) {
@@ -158,17 +160,17 @@ export default function PublishPage() {
         {propertyType !== "Terrenos" && <div className="publication-field-row">{propertyType !== "Oficinas" && propertyType !== "Locales comerciales" && <label>Habitaciones<input name="bedrooms" type="number" min="0" step="1" /></label>}<label>Baños<input name="bathrooms" type="number" min="0" step="1" /></label><label>Estacionamientos<input name="parking_spaces" type="number" min="0" step="1" /></label><label>Pisos<input name="floors" type="number" min="0" step="1" /></label><label>Mantenimiento<input name="maintenance_fee" type="number" min="0" step="any" /></label></div>}
       </fieldset>
       <fieldset disabled={isSubmitting} className="location-fieldset"><legend>Ubicación del inmueble</legend>
-        <p className="location-hint">Arrastra el puntero para fijar el punto en el mapa. También puedes tocar el mapa.</p>
+        <p className="location-hint">Arrastra el puntero para fijar el punto en el mapa.</p>
+        <small className="location-sub">También puedes tocar el mapa. Es lo único que necesitas en esta sección.</small>
         <LocationPicker value={coordinatesConfirmed && validCoordinates(coords.latitude, coords.longitude) ? { lat: Number(coords.latitude), lng: Number(coords.longitude) } : null}
-          onPick={pickOnMap} disabled={isSubmitting} />
+          onPick={pickOnMap} onLocate={useLocation} disabled={isSubmitting} />
         <p className={coordinatesConfirmed ? "location-state ok" : "location-state"} aria-live="polite">{coordinatesConfirmed
-          ? `Ubicación fijada: ${coords.latitude}, ${coords.longitude}`
-          : "Coordenadas sin confirmar: fija el punto en el mapa o usa tu ubicación actual."}</p>
-        <button type="button" className="location-btn" onClick={useLocation}>Usar mi ubicación actual</button>
+          ? `✓ Ubicación fijada: ${coords.latitude}, ${coords.longitude}`
+          : "Ubicación sin fijar: mueve el pin hasta tu inmueble."}</p>
         <details className="location-manual">
-          <summary>Escribir coordenadas</summary>
-          <div className="coordinate-grid"><label>Latitud<input value={coords.latitude} onChange={e => editCoordinate("latitude", e.target.value)} inputMode="decimal" placeholder="-5.194500" /></label><label>Longitud<input value={coords.longitude} onChange={e => editCoordinate("longitude", e.target.value)} inputMode="decimal" placeholder="-80.632800" /></label></div>
-          <button type="button" className="location-btn" onClick={confirmCoordinates}>Confirmar coordenadas</button>
+          <summary>¿Tienes las coordenadas? Pégalas aquí</summary>
+          <label>Coordenadas<input value={coordText} onChange={e => pasteCoordinates(e.target.value)} inputMode="decimal" autoComplete="off" placeholder="-5.1945, -80.6328" /></label>
+          <small>{coordText.trim() && !coordinatesConfirmed ? "Escríbelas así: -5.1945, -80.6328 (latitud, longitud, dentro de Perú)." : "En Google Maps, mantén presionado el lugar y copia los números que aparecen."}</small>
         </details>
         <small>Este punto se mostrará en el mapa público de tu anuncio.</small>
       </fieldset>

@@ -32,3 +32,11 @@ it("desactivado no mueve el pin; el selector alterna mapa y satélite", () => {
   expect(screen.getByTestId("tiles").dataset.url).toContain("World_Imagery");
   expect(leaflet.setView).toHaveBeenCalled(); // lleva el mapa al punto recibido desde fuera
 });
+it("el botón «Ir a mi ubicación» vive dentro del mapa y se desactiva al enviar", () => {
+  const onLocate = vi.fn();
+  const view = render(<LocationPicker value={null} onPick={vi.fn()} onLocate={onLocate} />);
+  fireEvent.click(screen.getByRole("button", { name: "Ir a mi ubicación" }));
+  expect(onLocate).toHaveBeenCalledOnce();
+  view.rerender(<LocationPicker value={null} onPick={vi.fn()} onLocate={onLocate} disabled />);
+  expect((screen.getByRole("button", { name: "Ir a mi ubicación" }) as HTMLButtonElement).disabled).toBe(true);
+});
