@@ -10,7 +10,8 @@ const field = (name: string) => screen.getByLabelText(name) as HTMLInputElement;
 const change = (name: string, value: string) => fireEvent.change(field(name), { target: { value } });
 const pick = (files: File[]) => fireEvent.change(screen.getByLabelText(/Fotos de la propiedad/), { target: { files } });
 const submit = () => fireEvent.submit(field("Título del anuncio").form!);
-const confirm = () => fireEvent.click(screen.getByRole("button", { name: "Confirmar coordenadas" }));
+const paste = (value: string) => change("Coordenadas", value);
+const locate = () => fireEvent.click(screen.getByRole("button", { name: "Ir a mi ubicación" }));
 const reply = (body: unknown, status = 200) => ({ status, ok: status < 400, json: async () => body });
 const userId = "11111111-1111-4111-8111-111111111111";
 const recoveryId = "22222222-2222-4222-8222-222222222222";
@@ -30,8 +31,7 @@ function ready(confirmed = true) {
   change("Teléfono de contacto", "900 000 001");
   change("Título del anuncio", "Casa de prueba"); change("Descripción", "Descripción de prueba");
   change("Dirección o sector", "Piura"); change("Región", "Piura"); change("Ciudad o provincia", "Piura"); change("Precio", "100.5");
-  change("Latitud", "-5.19"); change("Longitud", "-80.63");
-  pick([photo()]); if (confirmed) confirm();
+  pick([photo()]); if (confirmed) paste("-5.19, -80.63");
   return view;
 }
 beforeEach(() => {
@@ -68,16 +68,22 @@ describe("publication client guards", () => {
     ready(); const select = field(name); const option = document.createElement("option");
     option.value = "unknown"; select.append(option); change(name, "unknown"); submit(); expect(fetch).not.toHaveBeenCalled();
   });
-  it("requires explicit confirmation despite valid visual defaults", () => {
+  it("requires a fixed location before sending", () => {
     ready(false); submit(); expect(fetch).not.toHaveBeenCalled();
-    expect(screen.getByRole("status").textContent).toContain("Confirma las coordenadas");
+    expect(screen.getByRole("status").textContent).toBe("Fija la ubicación del inmueble en el mapa.");
   });
   it.each(["", "NaN", "Infinity", "-19.1", "1.1"])("rejects latitude %s", value => {
-    ready(); change("Latitud", value); confirm(); submit(); expect(fetch).not.toHaveBeenCalled();
+    ready(); paste(`${value}, -80.63`); submit(); expect(fetch).not.toHaveBeenCalled();
+    expect(screen.getByText(/Ubicación sin fijar/)).toBeTruthy();
   });
-  it("invalidates confirmation after editing either coordinate", () => {
-    ready(); change("Longitud", "-80.5"); submit(); expect(fetch).not.toHaveBeenCalled();
-    expect(screen.getByRole("status").textContent).toContain("Confirma");
+  it("invalidates the fixed location while the pasted text is incomplete", () => {
+    ready(); paste("-5.19, -80."); submit(); expect(fetch).not.toHaveBeenCalled();
+    expect(screen.getByText(/Escríbelas así/)).toBeTruthy();
+  });
+  it.each(["-5.19, -80.63", "-5.19,-80.63", "-5.19 -80.63", "(-5.19, -80.63)", "-5.19; -80.63"])("accepts pasted coordinates %s", async value => {
+    ready(false); paste(value);
+    expect(screen.getByText("✓ Ubicación fijada: -5.19, -80.63")).toBeTruthy();
+    submit(); await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
   });
   it.each([0, 6])("rejects %i photos", count => {
     ready(); pick(Array.from({ length: count }, () => photo())); submit();
@@ -103,31 +109,33 @@ describe("publication client guards", () => {
 describe("geolocation confirmation", () => {
   function geo() { const getCurrentPosition = vi.fn(); vi.stubGlobal("navigator", { geolocation: { getCurrentPosition } }); return getCurrentPosition; }
   it("rejects out-of-area geolocation without announcing success", () => {
-    ready(); const location = geo(); fireEvent.click(screen.getByRole("button", { name: "Usar mi ubicación actual" }));
+    ready(); const location = geo(); locate();
     act(() => location.mock.calls[0][0]({ coords: { latitude: 10, longitude: -77 } }));
     expect(screen.getByRole("status").textContent).toContain("fuera del área");
     submit(); expect(fetch).not.toHaveBeenCalled();
   });
   it("accepts successful in-area location as explicit confirmation", async () => {
-    ready(false); const location = geo(); fireEvent.click(screen.getByRole("button", { name: "Usar mi ubicación actual" }));
+    ready(false); const location = geo(); locate();
     act(() => location.mock.calls[0][0]({ coords: { latitude: -5.2, longitude: -80.6 } }));
     submit(); await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
   });
   it.each([1, 2, 3])("failure code %i unconfirms and preserves manual coordinates", code => {
-    ready(); change("Latitud", "-5.3"); confirm(); const location = geo();
-    fireEvent.click(screen.getByRole("button", { name: "Usar mi ubicación actual" }));
-    act(() => location.mock.calls[0][1]({ code })); expect(field("Latitud").value).toBe("-5.3");
+    ready(); paste("-5.3, -80.63"); const location = geo();
+    locate();
+    act(() => location.mock.calls[0][1]({ code })); expect(field("Coordenadas").value).toBe("-5.3, -80.63");
+    expect(screen.getByRole("status").textContent).toContain("Mueve el pin");
     submit(); expect(fetch).not.toHaveBeenCalled();
   });
   it("unsupported geolocation cannot keep previous confirmation", () => {
-    ready(); vi.stubGlobal("navigator", {}); fireEvent.click(screen.getByRole("button", { name: "Usar mi ubicación actual" }));
+    ready(); vi.stubGlobal("navigator", {}); locate();
     expect(screen.getByRole("status").textContent).toContain("no admite"); submit(); expect(fetch).not.toHaveBeenCalled();
   });
   it("ignores an obsolete geolocation callback after manual edit", () => {
-    ready(); const location = geo(); fireEvent.click(screen.getByRole("button", { name: "Usar mi ubicación actual" }));
-    change("Latitud", "-5.3");
+    ready(); const location = geo(); locate();
+    paste("-5.3, -80.63");
     act(() => location.mock.calls[0][0]({ coords: { latitude: -5.1, longitude: -80.5 } }));
-    expect(field("Latitud").value).toBe("-5.3"); submit(); expect(fetch).not.toHaveBeenCalled();
+    expect(field("Coordenadas").value).toBe("-5.3, -80.63");
+    expect(screen.getByText("✓ Ubicación fijada: -5.3, -80.63")).toBeTruthy();
   });
 });
 
@@ -148,7 +156,7 @@ describe("submission lifecycle", () => {
     await act(async () => resolve(reply({ ok: true, status: "published" })));
     expect(field("Título del anuncio").value).toBe("");
     expect(screen.queryByText("1 foto(s) seleccionada(s).")).toBeNull();
-    expect(screen.getByText(/Coordenadas sin confirmar/)).toBeTruthy();
+    expect(screen.getByText(/Ubicación sin fijar/)).toBeTruthy();
     expect((screen.getByRole("button", { name: "Publicar propiedad" }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByRole("button", { name: "Publicar otro anuncio" })).toBeTruthy();
     expect(screen.getByRole("status").textContent).toContain("Propiedad publicada");
@@ -528,15 +536,15 @@ describe("F01/F02 regression transitions", () => {
     act(() => { fireEvent.click(button); fireEvent.click(button); });
     expect(window.sessionStorage.getItem("publicationAttempt")).toBeNull();
     expect(field("Título del anuncio").value).toBe(""); expect(field("Teléfono de contacto").value).toBe("");
-    expect(field("Latitud").value).toBe(""); expect(field("Longitud").value).toBe("");
+    expect(field("Coordenadas").value).toBe("");
     expect(screen.queryByText("1 foto(s) seleccionada(s).")).toBeNull();
-    expect(screen.getByText(/Coordenadas sin confirmar/)).toBeTruthy();
+    expect(screen.getByText(/Ubicación sin fijar/)).toBeTruthy();
     expect(publishButton().disabled).toBe(false);
     expect(fetch).toHaveBeenCalledTimes(2); expect(uuid).toHaveBeenCalledOnce();
     change("Teléfono de contacto", "900000001"); change("Título del anuncio", "Nueva casa");
     change("Descripción", "Nueva descripción"); change("Dirección o sector", "Piura");
     change("Región", "Piura"); change("Ciudad o provincia", "Piura"); change("Precio", "200");
-    change("Latitud", "-5.19"); change("Longitud", "-80.63"); pick([photo()]); confirm();
+    pick([photo()]); paste("-5.19, -80.63");
     vi.mocked(fetch).mockResolvedValueOnce(reply({ ok: true, status: "published" }) as Response);
     submit(); await waitFor(() => expect(fetch).toHaveBeenCalledTimes(3));
     expect(uuid).toHaveBeenCalledTimes(2);
@@ -586,17 +594,20 @@ describe("pin de ubicación en el mapa", () => {
   }
   it("explica cómo fijar el punto y lo exige antes de enviar", () => {
     readyWithoutCoordinates();
-    expect(screen.getByText("Arrastra el puntero para fijar el punto en el mapa. También puedes tocar el mapa.")).toBeTruthy();
-    expect(screen.getByText(/Coordenadas sin confirmar/)).toBeTruthy();
+    expect(screen.getByText("Arrastra el puntero para fijar el punto en el mapa.")).toBeTruthy();
+    expect(screen.getByText(/Es lo único que necesitas en esta sección/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Confirmar coordenadas" })).toBeNull();
+    expect(screen.queryByLabelText("Latitud")).toBeNull();
+    expect(screen.getByText(/Ubicación sin fijar/)).toBeTruthy();
     submit(); expect(fetch).not.toHaveBeenCalled();
     expect(screen.getByRole("status").textContent).toBe("Fija la ubicación del inmueble en el mapa.");
   });
   it("soltar el pin fija y confirma la ubicación en un gesto, redondeada a 6 decimales", async () => {
     readyWithoutCoordinates();
     fireEvent.click(screen.getByRole("button", { name: "Soltar pin de prueba" }));
-    expect(screen.getByText("Ubicación fijada: -5.176585, -80.610694")).toBeTruthy();
+    expect(screen.getByText("✓ Ubicación fijada: -5.176585, -80.610694")).toBeTruthy();
     expect(screen.getByTestId("pin-del-mapa").textContent).toBe("-5.176585,-80.610694");
-    expect(field("Latitud").value).toBe("-5.176585");
+    expect(field("Coordenadas").value).toBe("-5.176585, -80.610694");
     submit(); await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
     const payload = vi.mocked(fetch).mock.calls[0][1]?.body as FormData;
     expect(payload.get("latitude")).toBe("-5.176585"); expect(payload.get("longitude")).toBe("-80.610694");
@@ -606,15 +617,15 @@ describe("pin de ubicación en el mapa", () => {
     readyWithoutCoordinates();
     fireEvent.click(screen.getByRole("button", { name: "Soltar pin fuera de Perú" }));
     expect(screen.getByRole("status").textContent).toContain("fuera del área permitida");
-    expect(screen.getByText(/Coordenadas sin confirmar/)).toBeTruthy();
+    expect(screen.getByText(/Ubicación sin fijar/)).toBeTruthy();
     expect(screen.getByTestId("pin-del-mapa").textContent).toBe("sin fijar");
     submit(); expect(fetch).not.toHaveBeenCalled();
   });
   it("editar las coordenadas a mano quita la confirmación del pin", () => {
     readyWithoutCoordinates();
     fireEvent.click(screen.getByRole("button", { name: "Soltar pin de prueba" }));
-    change("Latitud", "-5.2");
-    expect(screen.getByText(/Coordenadas sin confirmar/)).toBeTruthy();
+    paste("-5.2");
+    expect(screen.getByText(/Ubicación sin fijar/)).toBeTruthy();
     expect(screen.getByTestId("pin-del-mapa").textContent).toBe("sin fijar");
   });
 });

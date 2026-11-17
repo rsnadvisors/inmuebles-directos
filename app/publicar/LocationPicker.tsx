@@ -6,7 +6,7 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
 export type PickedPoint = { lat: number; lng: number };
-type Props = { value: PickedPoint | null; onPick: (lat: number, lng: number) => void; disabled?: boolean };
+type Props = { value: PickedPoint | null; onPick: (lat: number, lng: number) => void; onLocate?: () => void; disabled?: boolean };
 
 const PIURA: [number, number] = [-5.1945, -80.6328];
 const SATELLITE = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
@@ -36,7 +36,7 @@ function FollowValue({ value }: { value: PickedPoint | null }) {
   return null;
 }
 
-export default function LocationPicker({ value, onPick, disabled }: Props) {
+export default function LocationPicker({ value, onPick, onLocate, disabled }: Props) {
   const [satellite, setSatellite] = useState(false);
   // Antes de que el anunciante elija, el pin espera en el centro del mapa (semitransparente) para invitar a moverlo.
   const [idle, setIdle] = useState<PickedPoint>({ lat: PIURA[0], lng: PIURA[1] });
@@ -55,5 +55,7 @@ export default function LocationPicker({ value, onPick, disabled }: Props) {
       <button type="button" aria-pressed={!satellite} onClick={() => setSatellite(false)}>Mapa</button>
       <button type="button" aria-pressed={satellite} onClick={() => setSatellite(true)}>Satélite</button>
     </div>
+    {onLocate && <button type="button" className="location-picker-locate" disabled={disabled} onClick={onLocate}
+      aria-label="Ir a mi ubicación" title="Ir a mi ubicación">⌖<span>Mi ubicación</span></button>}
   </div>;
 }
