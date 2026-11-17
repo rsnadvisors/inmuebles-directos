@@ -113,6 +113,27 @@ describe("cancellation route admission", () => {
     if (action === "cancel") expect(remove).toHaveBeenCalledWith([path]);
     else expect(remove).not.toHaveBeenCalled();
   });
+  it.each([["ACTIVE", 200], ["CANCEL_PENDING", 200], ["CANCELLED", 200], ["FINALIZED", 409]] as const)(
+    "inspect is strictly read-only for a %s attempt and adds the owner's title", async (state, status) => {
+    const rpc = vi.fn(async () => ({ data: plan(state), error: null }));
+    const remove = vi.fn(), from = vi.fn((table: string) => ({ select: () => ({ eq: () => ({ maybeSingle: async () =>
+      ({ data: table === "properties" ? { title: "  Casa en Piura  " } : null }) }) }) }));
+    auth.client = { rpc, from, storage: { from: () => ({ remove }) } };
+    auth.user = { ...registeredUser };
+    const response = await POST(req({ requestId, action: "inspect" }));
+    expect(response.status).toBe(status);
+    const body = await response.json();
+    if (state === "FINALIZED") expect(body).toEqual({ ok: false, code: "PUBLICATION_ALREADY_FINALIZED", message: "La publicación ya está registrada.", title: "Casa en Piura" });
+    else expect(body).toEqual({ ok: true, requestId, state, title: "Casa en Piura" });
+    expect(rpc.mock.calls.map(call => JSON.parse((call as unknown as [string, { p_envelope: string }])[1].p_envelope).action)).toEqual(["inspect"]);
+    expect(remove).not.toHaveBeenCalled();
+  });
+  it("omits the title when it cannot be read", async () => {
+    const rpc = vi.fn(async () => ({ data: plan("ACTIVE"), error: null }));
+    auth.client = { rpc, from: () => { throw new Error("rls"); }, storage: { from: () => ({ remove: vi.fn() }) } };
+    auth.user = { ...registeredUser };
+    expect(await (await POST(req({ requestId, action: "inspect" }))).json()).toEqual({ ok: true, requestId, state: "ACTIVE" });
+  });
   it("denies a foreign attempt reported missing in the caller's owner context without Storage access", async () => {
     const rpc = vi.fn().mockResolvedValue({ data: null, error: { code: "PT404", message: "not found" } });
     const storageFrom = vi.fn();

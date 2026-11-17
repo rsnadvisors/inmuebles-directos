@@ -152,7 +152,7 @@ export default function PublishPage() {
       </fieldset>
       <label>Fotos de la propiedad<input type="file" accept="image/jpeg,image/png,image/webp" multiple required disabled={isSubmitting} onChange={onFiles} /><small>Obligatorio: 1 a 5 fotos · JPG, PNG o WebP · máximo 5 MiB por foto.</small>{files.length > 0 && <small>{files.length} foto(s) seleccionada(s).</small>}</label>
       <Turnstile ref={captcha} action="publish" />
-      <button className="publish-submit" type="submit" disabled={!recovery.canSubmit}>{isSubmitting ? "Publicando…" : "Publicar propiedad"}</button>
+      <button className="publish-submit" type="submit" disabled={!recovery.canSubmit}>{isSubmitting && status === "Publicando…" ? "Publicando…" : "Publicar propiedad"}</button>
       {status && <p className="form-status" role="status">{status}</p>}
       {status.startsWith("Propiedad publicada") && <div className="publish-success-links">{publishedSlug && <Link href={`/inmueble/${encodeURIComponent(publishedSlug)}`}>Ver ficha completa</Link>}<Link href="/mis-propiedades">Ver Mis propiedades</Link></div>}
     </form>

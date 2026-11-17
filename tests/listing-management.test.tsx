@@ -152,6 +152,29 @@ describe("botones de gestión", () => {
     fireEvent.click(screen.getByRole("button", { name: "Eliminar" }));
     expect(fetch).not.toHaveBeenCalled();
   });
+  it("un borrador se descarta con la cancelación verificada del servidor, tras confirmar", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ ok: true, requestId: ID, state: "CANCELLED" }), { status: 200 })));
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<ListingActions {...props} status="draft" publishedAt={null} />);
+    expect(screen.queryByRole("button", { name: "Eliminar" })).toBeNull();
+    expect(screen.getByText(/No terminó de publicarse/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Descartar borrador" }));
+    expect(confirm.mock.calls[0][0]).toContain("«Casa»");
+    await waitFor(() => expect(screen.getByText("Borrador descartado.")).toBeTruthy());
+    expect(vi.mocked(fetch).mock.calls[0][0]).toBe("/api/publicar/cancelar");
+    expect(JSON.parse(String(vi.mocked(fetch).mock.calls[0][1]!.body))).toEqual({ requestId: ID, action: "cancel" });
+    expect(stubs.refresh).toHaveBeenCalled();
+  });
+  it("no descarta un borrador si el usuario no confirma, y avisa si falla", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ ok: false, code: "RECONCILIATION_UNAVAILABLE" }), { status: 503 })));
+    const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);
+    render(<ListingActions {...props} status="draft" publishedAt={null} />);
+    fireEvent.click(screen.getByRole("button", { name: "Descartar borrador" }));
+    expect(fetch).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Descartar borrador" }));
+    await waitFor(() => expect(screen.getByText(/No pudimos descartarlo/)).toBeTruthy());
+    expect(confirm).toHaveBeenCalledTimes(2);
+  });
   it("un anuncio vendido ofrece volver a publicar y no muestra la ficha", () => {
     render(<ListingActions {...props} status="sold" />);
     expect(screen.getByRole("button", { name: "Volver a publicar" })).toBeTruthy();

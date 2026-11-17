@@ -16,10 +16,14 @@ const userId = "11111111-1111-4111-8111-111111111111";
 const recoveryId = "22222222-2222-4222-8222-222222222222";
 const savedReference = () => JSON.stringify({ id: recoveryId, fingerprint: "ab".repeat(32) });
 const publicationView = (canPublish = true, subject = userId) => <PublicationRecovery userId={subject} canPublish={canPublish}><PublishPage /></PublicationRecovery>;
+const resumeButton = () => screen.queryByRole("button", { name: "Reintentar con los mismos datos" }) as HTMLButtonElement | null;
+const recheckButton = () => screen.queryByRole("button", { name: "Volver a comprobar" }) as HTMLButtonElement | null;
 async function checkAndResume() {
-  fireEvent.click(screen.getByRole("button", { name: "Comprobar el intento pendiente" }));
-  await waitFor(() => expect((screen.getByRole("button", { name: "Reintentar el mismo intento" }) as HTMLButtonElement).disabled).toBe(false));
-  fireEvent.click(screen.getByRole("button", { name: "Reintentar el mismo intento" }));
+  // After a remount the read-only automatic check may already have found the attempt ACTIVE.
+  await waitFor(() => expect(resumeButton() ?? recheckButton()).toBeTruthy());
+  if (!resumeButton()) fireEvent.click(recheckButton()!);
+  await waitFor(() => expect(resumeButton()?.disabled).toBe(false));
+  fireEvent.click(resumeButton()!);
 }
 function ready(confirmed = true) {
   const view = render(publicationView());
@@ -34,6 +38,7 @@ beforeEach(() => {
   window.sessionStorage.clear();
   vi.stubGlobal("crypto", webcrypto);
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(reply({ ok: true, status: "published" })));
+  vi.stubGlobal("confirm", vi.fn(() => true));
 });
 
 describe("publication client guards", () => {
@@ -145,7 +150,7 @@ describe("submission lifecycle", () => {
     expect(screen.queryByText("1 foto(s) seleccionada(s).")).toBeNull();
     expect(screen.getByText(/Coordenadas sin confirmar/)).toBeTruthy();
     expect((screen.getByRole("button", { name: "Publicar propiedad" }) as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByRole("button", { name: "Iniciar nueva publicación" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Publicar otro anuncio" })).toBeTruthy();
     expect(screen.getByRole("status").textContent).toContain("Propiedad publicada");
   });
   it.each(["PARTIAL_OR_UNCERTAIN", "UNKNOWN"])("preserves form for %s and never retries", async code => {
@@ -159,7 +164,7 @@ describe("submission lifecycle", () => {
     ready(); vi.mocked(fetch).mockResolvedValue(reply({ ok: false, code }, 503) as Response);
     submit(); await waitFor(() => expect(screen.getByRole("status").textContent).not.toBe("Publicando…"));
     expect(screen.getByRole("alert").textContent).toBe(PARTIAL_MESSAGE); expect(field("Título del anuncio").value).toBe("Casa de prueba");
-    expect((screen.getByRole("button", { name: "Comprobar el intento pendiente" }) as HTMLButtonElement).disabled).toBe(false);
+    expect(recheckButton()!.disabled).toBe(false);
     submit(); expect(fetch).toHaveBeenCalledTimes(1);
   });
   it.each(["network", "json"])("releases lock and preserves data after %s exception", async failure => {
@@ -194,8 +199,10 @@ describe("submission lifecycle", () => {
     submit(); await waitFor(() => expect(screen.getByRole("alert").textContent).toBe(PARTIAL_MESSAGE));
     const firstId = (vi.mocked(fetch).mock.calls[0][1]?.headers as Record<string, string>)["X-Publication-Request-Id"];
     view.unmount(); ready();
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+    expect(JSON.parse(vi.mocked(fetch).mock.calls[1][1]?.body as string)).toEqual({ requestId: firstId, action: "inspect" });
     change("Título del anuncio", "  Casa de prueba  "); change("Precio", "100.500");
-    submit(); expect(fetch).toHaveBeenCalledTimes(1);
+    submit(); expect(fetch).toHaveBeenCalledTimes(2);
     await checkAndResume();
     submit(); await waitFor(() => expect(fetch).toHaveBeenCalledTimes(3));
     const nextId = (vi.mocked(fetch).mock.calls[2][1]?.headers as Record<string, string>)["X-Publication-Request-Id"];
@@ -221,10 +228,11 @@ describe("submission lifecycle", () => {
     const firstId = (vi.mocked(fetch).mock.calls[0][1]?.headers as Record<string, string>)["X-Publication-Request-Id"];
     await checkAndResume();
     edit(); submit();
-    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("publicación anterior pendiente"));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("anuncio anterior sin terminar"));
     expect(fetch).toHaveBeenCalledTimes(2);
     expect(window.sessionStorage.getItem("publicationAttempt")).toBe(firstAttempt);
-    fireEvent.click(screen.getByRole("button", { name: "Cancelar el intento pendiente" }));
+    fireEvent.click(screen.getByRole("button", { name: "Descartar este anuncio" }));
+    expect(window.confirm).toHaveBeenCalledOnce();
     await waitFor(() => expect(window.sessionStorage.getItem("publicationAttempt")).toBeNull());
     expect(vi.mocked(fetch).mock.calls[2][0]).toBe("/api/publicar/cancelar");
     expect(JSON.parse(vi.mocked(fetch).mock.calls[2][1]?.body as string)).toEqual({ requestId: firstId, action: "cancel" });
@@ -236,53 +244,80 @@ describe("submission lifecycle", () => {
 });
 
 describe("publication recovery after mounting", () => {
-  const check = () => fireEvent.click(screen.getByRole("button", { name: "Comprobar el intento pendiente" }));
-  const cancel = () => fireEvent.click(screen.getByRole("button", { name: "Cancelar el intento pendiente" }));
+  const discard = () => fireEvent.click(screen.getByRole("button", { name: "Descartar este anuncio" }));
   const publishButton = () => screen.getByRole("button", { name: "Publicar propiedad" }) as HTMLButtonElement;
+  const sentBody = (index: number) => JSON.parse(vi.mocked(fetch).mock.calls[index][1]?.body as string);
   function restore(raw = savedReference(), canPublish = true) {
     window.sessionStorage.setItem("publicationAttempt", raw);
     return render(publicationView(canPublish));
   }
-  it("restores before form validation without photos, automatic requests or UUID allocation", () => {
+  const active = (title?: string) => reply({ ok: true, requestId: recoveryId, state: "ACTIVE", ...(title ? { title } : {}) }) as Response;
+  const cancelled = () => reply({ ok: true, requestId: recoveryId, state: "CANCELLED" }) as Response;
+
+  it("restores before form validation with one read-only check and no UUID allocation", async () => {
     const uuid = vi.spyOn(crypto, "randomUUID");
+    vi.mocked(fetch).mockResolvedValue(active());
     restore();
+    expect(screen.getByRole("status").textContent).toContain("revisamos si tu último envío");
     expect(field("Título del anuncio").value).toBe("");
     expect((screen.getByLabelText(/Fotos de la propiedad/) as HTMLInputElement).files).toHaveLength(0);
-    expect(screen.getByText(/Comprobar puede completar una cancelación/)).toBeTruthy();
     expect(publishButton().disabled).toBe(true);
-    submit(); expect(fetch).not.toHaveBeenCalled(); expect(uuid).not.toHaveBeenCalled();
-  });
-  it("checks an existing own attempt using only its ID while the form remains empty", async () => {
-    restore();
-    vi.mocked(fetch).mockResolvedValue(reply({ ok: true, requestId: recoveryId, state: "ACTIVE" }) as Response);
-    check();
-    await screen.findByRole("button", { name: "Reintentar el mismo intento" });
+    await screen.findByRole("button", { name: "Reintentar con los mismos datos" });
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(vi.mocked(fetch).mock.calls[0][0]).toBe("/api/publicar/cancelar");
-    expect(JSON.parse(vi.mocked(fetch).mock.calls[0][1]?.body as string)).toEqual({ requestId: recoveryId, action: "reconcile" });
-    expect(publishButton().disabled).toBe(true);
+    expect(sentBody(0)).toEqual({ requestId: recoveryId, action: "inspect" });
+    submit(); expect(fetch).toHaveBeenCalledTimes(1); expect(uuid).not.toHaveBeenCalled();
     expect(window.sessionStorage.getItem("publicationAttempt")).toBe(savedReference());
   });
-  it("cancels explicitly without validating or submitting a new publication", async () => {
-    restore(); vi.mocked(fetch).mockResolvedValue(reply({ ok: true, requestId: recoveryId, state: "CANCELLED" }) as Response);
-    cancel(); await waitFor(() => expect(window.sessionStorage.getItem("publicationAttempt")).toBeNull());
-    expect(fetch).toHaveBeenCalledTimes(1);
-    expect(JSON.parse(vi.mocked(fetch).mock.calls[0][1]?.body as string)).toEqual({ requestId: recoveryId, action: "cancel" });
+  it("names the unfinished listing and offers to retry or discard it", async () => {
+    vi.mocked(fetch).mockResolvedValue(active("Terreno en Castilla"));
+    restore();
+    expect(await screen.findByRole("heading", { name: "«Terreno en Castilla» no terminó de publicarse" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Descartar este anuncio" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Volver a comprobar" })).toBeNull();
+    expect(screen.queryByText(/referencia local|titularidad|intento pendiente/)).toBeNull();
+    expect(publishButton().disabled).toBe(true);
+  });
+  it("discards explicitly after confirmation without validating or submitting a new publication", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(active()).mockResolvedValueOnce(cancelled());
+    restore(); await screen.findByRole("button", { name: "Descartar este anuncio" });
+    discard(); await waitFor(() => expect(window.sessionStorage.getItem("publicationAttempt")).toBeNull());
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(sentBody(1)).toEqual({ requestId: recoveryId, action: "cancel" });
     expect(publishButton().disabled).toBe(false);
+    expect(screen.getByRole("alert").textContent).toContain("Ya puedes publicar");
   });
-  it("keeps a pending cancellation frozen", async () => {
-    restore(); vi.mocked(fetch).mockResolvedValue(reply({ ok: true, requestId: recoveryId, state: "CANCEL_PENDING" }) as Response);
-    check(); await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("cancelación sigue pendiente"));
-    expect(publishButton().disabled).toBe(true);
-    expect(screen.queryByRole("button", { name: "Reintentar el mismo intento" })).toBeNull();
+  it("does nothing when the discard confirmation is declined", async () => {
+    vi.mocked(fetch).mockResolvedValue(active());
+    restore(); await screen.findByRole("button", { name: "Descartar este anuncio" });
+    vi.mocked(window.confirm).mockReturnValueOnce(false);
+    discard(); expect(fetch).toHaveBeenCalledTimes(1);
     expect(window.sessionStorage.getItem("publicationAttempt")).toBe(savedReference());
+  });
+  it("clears a reference the server already reports as cancelled", async () => {
+    vi.mocked(fetch).mockResolvedValue(cancelled());
+    restore(); await waitFor(() => expect(window.sessionStorage.getItem("publicationAttempt")).toBeNull());
+    expect(screen.getByRole("alert").textContent).toContain("ya estaba descartado");
+    expect(publishButton().disabled).toBe(false); expect(fetch).toHaveBeenCalledTimes(1);
+  });
+  it("keeps a pending cancellation frozen until the owner finishes it explicitly", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(reply({ ok: true, requestId: recoveryId, state: "CANCEL_PENDING" }) as Response)
+      .mockResolvedValueOnce(cancelled());
+    restore(); await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("Terminar de descartar"));
+    expect(publishButton().disabled).toBe(true);
+    expect(resumeButton()).toBeNull(); expect(fetch).toHaveBeenCalledTimes(1);
+    expect(window.sessionStorage.getItem("publicationAttempt")).toBe(savedReference());
+    fireEvent.click(screen.getByRole("button", { name: "Terminar de descartar" }));
+    await waitFor(() => expect(window.sessionStorage.getItem("publicationAttempt")).toBeNull());
+    expect(sentBody(1)).toEqual({ requestId: recoveryId, action: "reconcile" });
   });
   it("R06: retains a terminal reference on the documented correlated 409", async () => {
-    restore(); vi.mocked(fetch).mockResolvedValue(reply({ ok: false, code: "PUBLICATION_ALREADY_FINALIZED" }, 409) as Response);
-    check(); await screen.findByRole("button", { name: "Iniciar nueva publicación" });
+    vi.mocked(fetch).mockResolvedValue(reply({ ok: false, code: "PUBLICATION_ALREADY_FINALIZED", title: "Casa en Piura" }, 409) as Response);
+    restore(); await screen.findByRole("button", { name: "Publicar otro anuncio" });
     expect(window.sessionStorage.getItem("publicationAttempt")).toBe(savedReference());
     expect(publishButton().disabled).toBe(true);
-    expect(screen.getByRole("alert").textContent).toContain("ya fue registrada");
+    expect(screen.getByRole("heading", { name: "«Casa en Piura» ya está publicado" })).toBeTruthy();
+    expect(screen.getByRole("alert").textContent).toContain("No hace falta enviarlo otra vez");
     expect(fetch).toHaveBeenCalledTimes(1);
   });
   it.each([
@@ -296,34 +331,34 @@ describe("publication recovery after mounting", () => {
     [200, { ok: true, requestId: recoveryId, state: "CANCELLED", code: "PUBLICATION_ALREADY_FINALIZED" }],
     [200, null],
   ] as const)("preserves uncertain or contradictory response %s %j", async (status, body) => {
-    restore(); vi.mocked(fetch).mockResolvedValue(reply(body, status) as Response);
-    check(); await waitFor(() => expect(screen.getByRole("alert").textContent).toBe(PARTIAL_MESSAGE));
+    vi.mocked(fetch).mockResolvedValue(reply(body, status) as Response);
+    restore(); await waitFor(() => expect(screen.getByRole("alert").textContent).toBe(PARTIAL_MESSAGE));
     expect(window.sessionStorage.getItem("publicationAttempt")).toBe(savedReference());
     expect(publishButton().disabled).toBe(true); expect(fetch).toHaveBeenCalledTimes(1);
     expect(screen.queryByText(/PRIVATE/)).toBeNull();
+    expect(recheckButton()).toBeTruthy();
   });
-  it.each(["network", "json"])("R04: keeps the reference after recovery %s failure without automatic retry", async failure => {
-    restore();
+  it.each(["network", "json"])("R04: keeps the reference after a check %s failure without automatic retry", async failure => {
     if (failure === "network") vi.mocked(fetch).mockRejectedValue(new Error("PRIVATE"));
     else vi.mocked(fetch).mockResolvedValue({ ok: true, status: 200, json: async () => { throw new Error("PRIVATE"); } } as unknown as Response);
-    check(); await waitFor(() => expect(screen.getByRole("alert").textContent).toBe(PARTIAL_MESSAGE));
+    restore(); await waitFor(() => expect(screen.getByRole("alert").textContent).toBe(PARTIAL_MESSAGE));
     expect(fetch).toHaveBeenCalledTimes(1); expect(window.sessionStorage.getItem("publicationAttempt")).toBe(savedReference());
     expect(publishButton().disabled).toBe(true);
   });
   it.each(["not-json", "null", JSON.stringify({ id: "invalid", fingerprint: "ab".repeat(32) }),
     JSON.stringify({ id: recoveryId, fingerprint: "ab".repeat(32), padding: "á".repeat(600) })])("blocks malformed or oversized reference %s", raw => {
     restore(raw); submit();
-    expect(screen.getByRole("alert").textContent).toContain("referencia local no es válida");
-    expect(screen.queryByRole("button", { name: "Comprobar el intento pendiente" })).toBeNull();
+    expect(screen.getByRole("alert").textContent).toContain("No pudimos leer los datos de tu publicación anterior");
+    expect(recheckButton()).toBeNull();
     expect(fetch).not.toHaveBeenCalled(); expect(publishButton().disabled).toBe(true);
     expect(window.sessionStorage.getItem("publicationAttempt")).toBe(raw);
   });
   it("allows ID-only recovery for a bad fingerprint without repairing it or allowing publication", async () => {
     const raw = JSON.stringify({ id: recoveryId, fingerprint: "bad", owner: "untrusted", state: "FINALIZED" });
-    restore(raw); vi.mocked(fetch).mockResolvedValue(reply({ ok: true, requestId: recoveryId, state: "ACTIVE" }) as Response);
-    check(); await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("intento sigue pendiente"));
-    expect(JSON.parse(vi.mocked(fetch).mock.calls[0][1]?.body as string)).toEqual({ requestId: recoveryId, action: "reconcile" });
-    expect(screen.queryByRole("button", { name: "Reintentar el mismo intento" })).toBeNull();
+    vi.mocked(fetch).mockResolvedValue(active());
+    restore(raw); await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("Descártalo para poder publicar"));
+    expect(sentBody(0)).toEqual({ requestId: recoveryId, action: "inspect" });
+    expect(resumeButton()).toBeNull();
     expect(window.sessionStorage.getItem("publicationAttempt")).toBe(raw); expect(publishButton().disabled).toBe(true);
   });
   it("blocks new publication when storage cannot be read", () => {
@@ -338,29 +373,35 @@ describe("publication recovery after mounting", () => {
     submit(); expect(fetch).not.toHaveBeenCalled(); expect(uuid).toHaveBeenCalledOnce();
   });
   it("keeps the local block if terminal reference deletion fails", async () => {
-    restore(); vi.spyOn(Storage.prototype, "removeItem").mockImplementation(() => { throw new Error("unavailable"); });
-    vi.mocked(fetch).mockResolvedValue(reply({ ok: true, requestId: recoveryId, state: "CANCELLED" }) as Response);
-    cancel(); await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("no pudimos cerrar la referencia local"));
+    vi.spyOn(Storage.prototype, "removeItem").mockImplementation(() => { throw new Error("unavailable"); });
+    vi.mocked(fetch).mockResolvedValue(cancelled());
+    restore(); await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("no pudimos actualizar este navegador"));
     expect(window.sessionStorage.getItem("publicationAttempt")).toBe(savedReference()); expect(publishButton().disabled).toBe(true);
   });
-  it("blocks a second synchronous recovery action", async () => {
-    restore(); let done!: (value: Response) => void;
-    vi.mocked(fetch).mockImplementation(() => new Promise(resolve => { done = resolve; }));
-    const button = screen.getByRole("button", { name: "Comprobar el intento pendiente" });
+  it("blocks a second synchronous recovery action, including during the automatic check", async () => {
+    const pending: ((value: Response) => void)[] = [];
+    vi.mocked(fetch).mockImplementation(() => new Promise(resolve => { pending.push(resolve); }));
+    restore(); expect(fetch).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button", { name: "Descartar este anuncio" })).toBeNull();
+    await act(async () => pending[0](active()));
+    const button = await screen.findByRole("button", { name: "Descartar este anuncio" });
     act(() => { fireEvent.click(button); fireEvent.click(button); });
-    expect(fetch).toHaveBeenCalledTimes(1);
-    await act(async () => done(reply({ ok: true, requestId: recoveryId, state: "ACTIVE" }) as Response));
+    expect(fetch).toHaveBeenCalledTimes(2);
+    await act(async () => pending[1](cancelled()));
   });
   it.each(["replacement", "unmount", "identity"])("does not clear a later reference after %s", async changeContext => {
-    const view = restore(); let done!: (value: Response) => void;
-    vi.mocked(fetch).mockImplementation(() => new Promise(resolve => { done = resolve; }));
-    check();
+    const pending: ((value: Response) => void)[] = [];
+    vi.mocked(fetch).mockImplementation(() => new Promise(resolve => { pending.push(resolve); }));
+    const view = restore(); expect(fetch).toHaveBeenCalledTimes(1);
     const later = JSON.stringify({ id: "44444444-4444-4444-8444-444444444444", fingerprint: "cd".repeat(32) });
     window.sessionStorage.setItem("publicationAttempt", later);
     if (changeContext === "unmount") view.unmount();
     if (changeContext === "identity") view.rerender(publicationView(false, "55555555-5555-4555-8555-555555555555"));
-    await act(async () => done(reply({ ok: true, requestId: recoveryId, state: "CANCELLED" }) as Response));
-    expect(window.sessionStorage.getItem("publicationAttempt")).toBe(later); expect(fetch).toHaveBeenCalledTimes(1);
+    await act(async () => pending[0](cancelled()));
+    expect(window.sessionStorage.getItem("publicationAttempt")).toBe(later);
+    // A new identity re-checks (read-only) the reference it now sees; nothing else is sent.
+    expect(fetch).toHaveBeenCalledTimes(changeContext === "identity" ? 2 : 1);
+    if (changeContext === "identity") expect(sentBody(1)).toEqual({ requestId: "44444444-4444-4444-8444-444444444444", action: "inspect" });
     if (changeContext === "replacement") expect(publishButton().disabled).toBe(true);
   });
   it("does not clear a newer reference after an old publication response arrives", async () => {
@@ -371,34 +412,35 @@ describe("publication recovery after mounting", () => {
     await act(async () => done(reply({ ok: true, status: "published" }) as Response));
     expect(window.sessionStorage.getItem("publicationAttempt")).toBe(later);
   });
-  it("does not query or allocate IDs on repeated remounts", () => {
+  it("remounts only issue read-only checks and never allocate IDs", () => {
     const uuid = vi.spyOn(crypto, "randomUUID");
+    vi.mocked(fetch).mockImplementation(() => new Promise(() => {}));
     for (let count = 0; count < 3; count++) { const view = restore(); expect(publishButton().disabled).toBe(true); view.unmount(); }
-    expect(fetch).not.toHaveBeenCalled(); expect(uuid).not.toHaveBeenCalled();
+    expect(fetch).toHaveBeenCalledTimes(3); expect(uuid).not.toHaveBeenCalled();
+    for (let index = 0; index < 3; index++) expect(sentBody(index)).toEqual({ requestId: recoveryId, action: "inspect" });
   });
   it("shows recovery alone for a noneligible verified identity and retains a denied foreign reference", async () => {
+    vi.mocked(fetch).mockResolvedValue(reply({ ok: false, code: "PUBLICATION_NOT_FOUND" }, 404) as Response);
     restore(savedReference(), false);
     expect(screen.queryByRole("button", { name: "Publicar propiedad" })).toBeNull();
     expect(screen.queryByLabelText("Título del anuncio")).toBeNull();
-    expect(fetch).not.toHaveBeenCalled();
-    vi.mocked(fetch).mockResolvedValue(reply({ ok: false, code: "PUBLICATION_NOT_FOUND" }, 404) as Response);
-    check(); await waitFor(() => expect(screen.getByRole("alert").textContent).toBe(PARTIAL_MESSAGE));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toBe(PARTIAL_MESSAGE));
     expect(window.sessionStorage.getItem("publicationAttempt")).toBe(savedReference());
     expect(fetch).toHaveBeenCalledTimes(1);
   });
-  it("allows limited own-attempt cancellation without exposing a new-publication form", async () => {
-    restore(savedReference(), false);
-    vi.mocked(fetch).mockResolvedValue(reply({ ok: true, requestId: recoveryId, state: "CANCELLED" }) as Response);
-    cancel(); await waitFor(() => expect(window.sessionStorage.getItem("publicationAttempt")).toBeNull());
+  it("allows limited own-attempt discarding without exposing a new-publication form", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(active()).mockResolvedValueOnce(cancelled());
+    restore(savedReference(), false); await screen.findByRole("button", { name: "Descartar este anuncio" });
+    discard(); await waitFor(() => expect(window.sessionStorage.getItem("publicationAttempt")).toBeNull());
     expect(screen.queryByLabelText("Título del anuncio")).toBeNull();
     expect(screen.queryByRole("button", { name: "Publicar propiedad" })).toBeNull();
-    expect(fetch).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(fetch).mock.calls[0][0]).toBe("/api/publicar/cancelar");
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(fetch).mock.calls[1][0]).toBe("/api/publicar/cancelar");
   });
 });
 
 describe("F01/F02 regression transitions", () => {
-  const check = () => fireEvent.click(screen.getByRole("button", { name: "Comprobar el intento pendiente" }));
+  const check = () => fireEvent.click(recheckButton()!);
   const publishButton = () => screen.getByRole("button", { name: "Publicar propiedad" }) as HTMLButtonElement;
   const rejected = (id: string, overrides: Record<string, unknown> = {}, status = 400) => reply({
     ok: false, code: "VALIDATION_ERROR", message: "Corrige los datos.", preparation: "NOT_STARTED",
@@ -411,7 +453,7 @@ describe("F01/F02 regression transitions", () => {
     submit(); await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(screen.getByRole("alert").textContent).toBe(PARTIAL_MESSAGE));
     const raw = window.sessionStorage.getItem("publicationAttempt")!;
-    check(); await screen.findByRole("button", { name: "Iniciar nueva publicación" });
+    check(); await screen.findByRole("button", { name: "Publicar otro anuncio" });
     return { view, raw };
   }
   it("R01: releases only a new correlated pre-preparation rejection and preserves the form", async () => {
@@ -482,7 +524,7 @@ describe("F01/F02 regression transitions", () => {
   it("R08/R10: explicit new publication resets once without allocating an ID or sending", async () => {
     const uuid = vi.spyOn(crypto, "randomUUID");
     const { raw } = await recoverFinalized();
-    const button = screen.getByRole("button", { name: "Iniciar nueva publicación" });
+    const button = screen.getByRole("button", { name: "Publicar otro anuncio" });
     act(() => { fireEvent.click(button); fireEvent.click(button); });
     expect(window.sessionStorage.getItem("publicationAttempt")).toBeNull();
     expect(field("Título del anuncio").value).toBe(""); expect(field("Teléfono de contacto").value).toBe("");
@@ -501,29 +543,35 @@ describe("F01/F02 regression transitions", () => {
     expect((vi.mocked(fetch).mock.calls[2][1]?.headers as Record<string, string>)["X-Publication-Request-Id"]).not.toBe(JSON.parse(raw).id);
     await waitFor(() => expect(screen.getByRole("status").textContent).toContain("Propiedad publicada"));
   });
-  it("R06: remounting a finalized reference stays blocked without an automatic request", async () => {
+  it("R06: remounting a finalized reference only re-checks read-only and stays blocked", async () => {
     const { view, raw } = await recoverFinalized();
+    vi.mocked(fetch).mockResolvedValueOnce(reply({ ok: false, code: "PUBLICATION_ALREADY_FINALIZED" }, 409) as Response);
     view.unmount(); render(publicationView());
+    await screen.findByRole("button", { name: "Publicar otro anuncio" });
+    expect(JSON.parse(vi.mocked(fetch).mock.calls[2][1]?.body as string)).toEqual({ requestId: JSON.parse(raw).id, action: "inspect" });
     expect(window.sessionStorage.getItem("publicationAttempt")).toBe(raw);
-    expect(publishButton().disabled).toBe(true); expect(fetch).toHaveBeenCalledTimes(2);
+    expect(publishButton().disabled).toBe(true); expect(fetch).toHaveBeenCalledTimes(3);
   });
   it("R08: failed terminal-reference deletion never resets the form or permits submission", async () => {
     const { raw } = await recoverFinalized();
     vi.spyOn(Storage.prototype, "removeItem").mockImplementation(() => { throw new Error("unavailable"); });
-    fireEvent.click(screen.getByRole("button", { name: "Iniciar nueva publicación" }));
+    fireEvent.click(screen.getByRole("button", { name: "Publicar otro anuncio" }));
     expect(window.sessionStorage.getItem("publicationAttempt")).toBe(raw);
     expect(field("Título del anuncio").value).toBe("Casa de prueba");
     expect(publishButton().disabled).toBe(true); expect(fetch).toHaveBeenCalledTimes(2);
-    expect(screen.getByRole("alert").textContent).toContain("Conservamos el bloqueo");
+    expect(screen.getByRole("alert").textContent).toContain("No pudimos preparar un formulario nuevo");
   });
   it("R09: an old conclusive rejection cannot clear a reference after identity changes", async () => {
-    const view = ready(); let done!: (value: Response) => void;
-    vi.mocked(fetch).mockImplementation(() => new Promise(resolve => { done = resolve; }));
+    const view = ready(); const pending: ((value: Response) => void)[] = [];
+    vi.mocked(fetch).mockImplementation(() => new Promise(resolve => { pending.push(resolve); }));
     submit(); await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
     const raw = window.sessionStorage.getItem("publicationAttempt")!;
     view.rerender(publicationView(true, "55555555-5555-4555-8555-555555555555"));
-    await act(async () => done(rejected(JSON.parse(raw).id)));
+    await act(async () => pending[0](rejected(JSON.parse(raw).id)));
     expect(window.sessionStorage.getItem("publicationAttempt")).toBe(raw);
-    expect(publishButton().disabled).toBe(true); expect(fetch).toHaveBeenCalledTimes(1);
+    expect((document.querySelector(".publish-submit") as HTMLButtonElement).disabled).toBe(true);
+    // The new identity only re-checks the reference read-only; nothing is resubmitted.
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(vi.mocked(fetch).mock.calls[1][1]?.body as string)).toEqual({ requestId: JSON.parse(raw).id, action: "inspect" });
   });
 });
