@@ -575,3 +575,46 @@ describe("F01/F02 regression transitions", () => {
     expect(JSON.parse(vi.mocked(fetch).mock.calls[1][1]?.body as string)).toEqual({ requestId: JSON.parse(raw).id, action: "inspect" });
   });
 });
+
+describe("pin de ubicación en el mapa", () => {
+  function readyWithoutCoordinates() {
+    render(publicationView());
+    change("Teléfono de contacto", "900 000 001");
+    change("Título del anuncio", "Terreno de prueba"); change("Descripción", "Descripción de prueba");
+    change("Dirección o sector", "Piura"); change("Región", "Piura"); change("Ciudad o provincia", "Piura"); change("Precio", "65000");
+    pick([photo()]);
+  }
+  it("explica cómo fijar el punto y lo exige antes de enviar", () => {
+    readyWithoutCoordinates();
+    expect(screen.getByText("Arrastra el puntero para fijar el punto en el mapa. También puedes tocar el mapa.")).toBeTruthy();
+    expect(screen.getByText(/Coordenadas sin confirmar/)).toBeTruthy();
+    submit(); expect(fetch).not.toHaveBeenCalled();
+    expect(screen.getByRole("status").textContent).toBe("Fija la ubicación del inmueble en el mapa.");
+  });
+  it("soltar el pin fija y confirma la ubicación en un gesto, redondeada a 6 decimales", async () => {
+    readyWithoutCoordinates();
+    fireEvent.click(screen.getByRole("button", { name: "Soltar pin de prueba" }));
+    expect(screen.getByText("Ubicación fijada: -5.176585, -80.610694")).toBeTruthy();
+    expect(screen.getByTestId("pin-del-mapa").textContent).toBe("-5.176585,-80.610694");
+    expect(field("Latitud").value).toBe("-5.176585");
+    submit(); await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+    const payload = vi.mocked(fetch).mock.calls[0][1]?.body as FormData;
+    expect(payload.get("latitude")).toBe("-5.176585"); expect(payload.get("longitude")).toBe("-80.610694");
+    expect(payload.get("coordinatesConfirmed")).toBe("true");
+  });
+  it("rechaza un punto fuera de Perú sin confirmarlo", () => {
+    readyWithoutCoordinates();
+    fireEvent.click(screen.getByRole("button", { name: "Soltar pin fuera de Perú" }));
+    expect(screen.getByRole("status").textContent).toContain("fuera del área permitida");
+    expect(screen.getByText(/Coordenadas sin confirmar/)).toBeTruthy();
+    expect(screen.getByTestId("pin-del-mapa").textContent).toBe("sin fijar");
+    submit(); expect(fetch).not.toHaveBeenCalled();
+  });
+  it("editar las coordenadas a mano quita la confirmación del pin", () => {
+    readyWithoutCoordinates();
+    fireEvent.click(screen.getByRole("button", { name: "Soltar pin de prueba" }));
+    change("Latitud", "-5.2");
+    expect(screen.getByText(/Coordenadas sin confirmar/)).toBeTruthy();
+    expect(screen.getByTestId("pin-del-mapa").textContent).toBe("sin fijar");
+  });
+});
