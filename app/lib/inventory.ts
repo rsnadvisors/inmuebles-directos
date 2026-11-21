@@ -173,11 +173,40 @@ function searchText(value: string): string {
   return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("es-PE").trim();
 }
 
+// Palabras con las que la gente nombra cada tipo y operación (singular, plural, sinónimos de Piura/Perú).
+const TYPE_WORDS: Record<string, string> = {
+  Casas: "casa casas vivienda chalet", Departamentos: "departamento departamentos depa dpto apartamento flat",
+  Terrenos: "terreno terrenos lote lotes", Oficinas: "oficina oficinas consultorio",
+  "Locales comerciales": "local locales comercial comerciales tienda negocio",
+};
+const OPERATION_WORDS: Record<string, string> = {
+  Alquilar: "alquiler alquilar alquila renta rentar arriendo", Comprar: "venta vender vende compra comprar",
+};
+// Palabras vacías que no deben exigir coincidencia («casa en Castilla», «local de Piura»).
+const STOP_WORDS = new Set(["de", "del", "en", "la", "las", "el", "los", "y", "a", "con", "para", "por", "un", "una"]);
+/** Singular aproximado en español: «locales» → «local», «casas» → «casa», «comerciales» → «comercial». */
+function stem(word: string): string {
+  if (word.length > 4 && word.endsWith("es") && !/[aeiou]es$/.test(word)) return word.slice(0, -2);
+  if (word.length > 3 && word.endsWith("s")) return word.slice(0, -1);
+  return word;
+}
+const words = (value: string) => searchText(value).split(/[^a-z0-9ñ]+/).filter(Boolean);
+/**
+ * Búsqueda por palabras, no por frase exacta: cada palabra escrita (sin las vacías) debe aparecer en el anuncio,
+ * en cualquier orden, sin importar mayúsculas, tildes ni singular/plural, y vale escribirla a medias («comer»).
+ * Solo se lleva a singular lo escrito; las palabras del anuncio se comparan por prefijo («lote» encuentra «lotes»).
+ */
+export function matchesSearch(item: Listing, query: string): boolean {
+  const wanted = words(query).filter(word => !STOP_WORDS.has(word)).map(stem);
+  if (!wanted.length) return true;
+  const haystack = words([item.title, item.locationParts.address, item.locationParts.district, item.locationParts.city,
+    item.locationParts.region, item.type, TYPE_WORDS[item.type] ?? "", item.operation, OPERATION_WORDS[item.operation] ?? ""].join(" "));
+  return wanted.every(term => haystack.some(word => word.startsWith(term)));
+}
+
 export function filterAndSortListings(listings: Listing[], query: string, operation: string, type: string, sort: string): Listing[] {
-  const term = searchText(query);
   const result = listings.filter(item => {
-    const searchable = [item.title, item.locationParts.district, item.locationParts.city, item.locationParts.region, item.type].join(" ");
-    return (!term || searchText(searchable).includes(term))
+    return matchesSearch(item, query)
       && (operation === "Todo" || item.operation === operation)
       && (type === "Todo" || item.type === type);
   });
