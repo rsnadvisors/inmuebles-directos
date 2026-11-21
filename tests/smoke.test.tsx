@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import Home from "../app/page";
@@ -59,6 +60,21 @@ describe("baseline smoke tests (offline)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Cerrar galería" }));
     fireEvent.click(screen.getByRole("button", { name: "Cerrar detalle de propiedad" }));
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("keeps the close button outside the scrolling content so it never scrolls away", async () => {
+    await renderHome();
+    const card = screen.getByRole("heading", { name: "Casa de prueba" }).closest("article")!;
+    fireEvent.click(within(card).getByRole("button", { name: "Ver detalles" }));
+    const dialog = screen.getByRole("dialog", { name: "Ficha de Casa de prueba" });
+    const close = within(dialog).getByRole("button", { name: "Cerrar detalle de propiedad" });
+    const scroller = dialog.querySelector(".drawer-scroll")!;
+    expect(close.parentElement).toBe(dialog);
+    expect(scroller.contains(close)).toBe(false);
+    expect(scroller.contains(within(dialog).getByRole("link", { name: "Ficha completa" }))).toBe(true);
+    const css = readFileSync("app/globals.css", "utf8");
+    expect(css).toMatch(/\.property-drawer\{display:flex;flex-direction:column;padding:0;overflow:hidden;max-height:calc\(100dvh - 48px\)\}/);
+    expect(css).toMatch(/\.drawer-scroll\{[^}]*overflow:auto/);
   });
 
   it("changes an individual operation filter and clears it", async () => {
