@@ -142,13 +142,16 @@ export default function Home() {
       </section>
 
       {selected && <div className="property-drawer" role="dialog" aria-label={`Ficha de ${selected.title}`}>
-        <button ref={drawerCloseRef} className="drawer-close" type="button" onClick={() => closeDrawer()} aria-label="Cerrar detalle de propiedad">×</button>
+        <button ref={drawerCloseRef} className="drawer-close" type="button" onClick={() => closeDrawer()} aria-label="Cerrar detalle de propiedad" title="Cerrar">×</button>
+        {/* Solo se desplaza el contenido: el botón × queda fijo sobre la esquina de la foto en escritorio y en móvil. */}
+        <div className="drawer-scroll">
         {selected.images.length > 0 ? <div className="drawer-gallery"><button className="drawer-main-image" type="button" onClick={() => setGalleryOpen(true)} aria-label="Ampliar galería"><img src={selected.images[galleryIndex]} alt={selected.title} /><span>{galleryIndex + 1} / {selected.images.length}</span></button><div>{selected.images.slice(0, 5).map((image, index) => <button key={image} type="button" aria-label={`Ver imagen ${index + 1}`} className={galleryIndex === index ? "active" : ""} onClick={() => setGalleryIndex(index)}><img src={image} alt="" /></button>)}</div></div> : <div className="drawer-media-empty"><span aria-hidden="true">{propertyIcon(selected.type)}</span><strong>Sin fotografías disponibles</strong></div>}
         <div className="drawer-kicker">{selected.operation} · {selected.type}{selected.reserved && <span className="reserved-badge">Reservado</span>}</div><h2>{selected.title}</h2><div className="drawer-price">{formatPrice(selected.price, selected.currency)}</div>
         {selected.description && <p className="drawer-description">{selected.description}</p>}
         <div className="drawer-location"><span aria-hidden="true">⌖</span> {previewLocation(selected)}</div><ListingAttributes listing={selected} context="drawer" />
         <div className="drawer-actions">{selected.slug && <Link className="drawer-primary-action" href={`/inmueble/${selected.slug}`}>Ficha completa</Link>}{selected.coords && <button className="drawer-secondary-action" type="button" onClick={() => closeDrawer(true)}>Ver mapa</button>}</div>
         <PropertyContactActions phone={selected.contactPhone} title={selected.title} status={selected.status} listingId={selected.id} /><ListingViewBeacon id={selected.id} />
+        </div>
       </div>}
       {selected && galleryOpen && <div className="gallery-modal" role="dialog" aria-modal="true" aria-label={`Galería de ${selected.title}`}><button type="button" className="gallery-modal-close" onClick={() => setGalleryOpen(false)} aria-label="Cerrar galería">×</button><button type="button" className="gallery-prev" onClick={() => setGalleryIndex((galleryIndex - 1 + selected.images.length) % selected.images.length)} aria-label="Imagen anterior">‹</button><img src={selected.images[galleryIndex]} alt={selected.title} /><button type="button" className="gallery-next" onClick={() => setGalleryIndex((galleryIndex + 1) % selected.images.length)} aria-label="Imagen siguiente">›</button><span>{galleryIndex + 1} / {selected.images.length}</span></div>}
     </main>
