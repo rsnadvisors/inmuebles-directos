@@ -46,6 +46,32 @@ function ResetViewOnClose({ resetViewKey = 0 }: { resetViewKey?: number }) {
   return null;
 }
 
+/**
+ * Al buscar o filtrar, lleva el mapa hasta los resultados si alguno quedó fuera de la vista
+ * (antes, «Local comercial» encontraba el local pero su pin quedaba fuera de la pantalla del celular).
+ * No actúa en la primera carga ni si todos los resultados ya se ven.
+ */
+function FitToResults({ properties }: { properties: Property[] }) {
+  const map = useMap();
+  const key = properties.map(p => p.id).join(",");
+  const firstRender = useRef(true);
+  useEffect(() => {
+    if (firstRender.current) { firstRender.current = false; return; }
+    if (!properties.length || typeof map.getBounds !== "function") return;
+    // Espera a que el usuario deje de escribir: cada letra cambia los resultados y los movimientos se pisarían.
+    const timer = window.setTimeout(() => {
+      const bounds = L.latLngBounds(properties.map(p => p.coords));
+      // Un solo resultado: se centra salvo que ya esté en la zona central. Varios: se encuadran si alguno no se ve bien.
+      if (properties.length === 1) {
+        if (!map.getBounds().pad(-0.3).contains(bounds)) map.setView(properties[0].coords, Math.max(map.getZoom(), 15), { animate: true });
+      } else if (!map.getBounds().pad(-0.08).contains(bounds)) map.fitBounds(bounds, { padding: [56, 56], maxZoom: 16, animate: true });
+    }, 450);
+    return () => window.clearTimeout(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- solo cuando cambia el conjunto de resultados
+  }, [map, key]);
+  return null;
+}
+
 export default function PiuraMap({ properties = [], onSelect, resetViewKey, layoutKey, center = piura }: Props) {
   const [satellite, setSatellite] = useState(false);
   const shown = properties;
@@ -56,6 +82,7 @@ export default function PiuraMap({ properties = [], onSelect, resetViewKey, layo
       <LocateButton />
       <ResetViewOnClose resetViewKey={resetViewKey} />
       <ResizeMap layoutKey={layoutKey} />
+      <FitToResults properties={shown} />
     </MapContainer>
     <div className="map-badge">Mapa · {shown.length} propiedades con ubicación</div>
     <LayerToggle satellite={satellite} onChange={setSatellite} />
