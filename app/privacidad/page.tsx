@@ -41,7 +41,9 @@ export default function Privacidad() {
       <h2>4. Información pública de los anuncios</h2>
       <p>
         Al publicar un anuncio, sus datos, fotografías y el <strong>teléfono de contacto</strong> que indiques serán
-        visibles para cualquier visitante, con el fin de que puedan llamarte o escribirte por WhatsApp. Puedes
+        visibles para cualquier visitante, con el fin de que puedan llamarte o escribirte por WhatsApp. En la ficha
+        también se muestra tu <strong>nombre abreviado</strong> (primer nombre e inicial del apellido, por ejemplo
+        «Ricardo S.») como anunciante; nunca tu nombre completo ni tu correo. Puedes
         archivar o modificar tus anuncios en cualquier momento.
       </p>
 

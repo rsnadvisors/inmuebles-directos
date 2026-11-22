@@ -24,3 +24,19 @@ export async function queryPublishedListing(slug: string): Promise<Listing | nul
 }
 
 export const getPublishedListing = cache(queryPublishedListing);
+
+/**
+ * Nombre abreviado del anunciante («Ricardo S.»). Lo calcula la base (listing_publisher_name) solo para anuncios
+ * publicados; un fallo o un perfil sin nombre devuelven null y la ficha muestra «Anunciante» sin romperse.
+ */
+export async function queryPublisherName(propertyId: string | number): Promise<string | null> {
+  if (!supabase) return null;
+  try {
+    const { data, error } = await supabase.rpc("listing_publisher_name", { p_property_id: String(propertyId) });
+    if (error || typeof data !== "string") return null;
+    const name = data.replace(/\s+/g, " ").trim().slice(0, 60);
+    return name || null;
+  } catch { return null; }
+}
+
+export const getPublisherName = cache(queryPublisherName);
