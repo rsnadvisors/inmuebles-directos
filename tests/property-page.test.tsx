@@ -18,13 +18,13 @@ describe("canonical property page", () => {
     expect(screen.getAllByText("0").length).toBeGreaterThan(0);
     const metadata = await generateMetadata({ params: Promise.resolve({ slug: "fixture-house" }) });
     expect(metadata.alternates?.canonical).toBe("/inmueble/fixture-house");
-    expect(metadata.title).toBe("Casa de prueba | Inmuebles Directos");
+    expect(metadata.title).toBe("Casa de prueba, Piura | En venta | Inmuebles Directos");
   });
 
   it("normalizes geographic duplicates and whitespace in SEO descriptions", async () => {
     setInventory([{ ...properties[0], city: " Piura ", region: "PIURA", country: "Perú", description: "Amplia casa\n\ncon excelente\tubicación y     buena iluminación." }]);
     const metadata = await generateMetadata({ params: Promise.resolve({ slug: "fixture-house" }) });
-    const description = "Casa de prueba. Comprar · Casas · Dirección ficticia 100, Distrito de prueba, Piura, Perú. Amplia casa con excelente ubicación y buena iluminación.";
+    const description = "Casa en venta en Distrito de prueba, Piura por US$ 125,000. 120 m², 3 habitaciones, 2 baños, 1 estacionamiento. Amplia casa con excelente ubicación y buena…";
     expect(metadata.description).toBe(description);
     expect(metadata.openGraph?.description).toBe(description);
     expect(description.length).toBeLessThanOrEqual(160);

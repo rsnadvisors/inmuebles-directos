@@ -2,7 +2,8 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { siteOrigin } from "../../lib/auth-origin";
 import Link from "next/link";
-import { formatPrice, isMappable, listingCity, type Listing } from "../../lib/inventory";
+import { formatPrice, isMappable, type Listing } from "../../lib/inventory";
+import { jsonLdText, listingBreadcrumb, listingJsonLd, listingSeoDescription, listingSeoTitle } from "../../lib/listing-seo";
 import { getPublishedListing, getPublisherName } from "../../lib/property";
 import PropertyGallery from "./PropertyGallery";
 import PropertyMap from "./PropertyMap";
@@ -14,11 +15,6 @@ import { TITULAR } from "../../lib/legal";
 
 type PageProps = { params: Promise<{ slug: string }> };
 
-function metaDescription(property: Listing): string {
-  const context = [property.operation !== "Operación no especificada" ? property.operation : "", property.type !== "Tipo no especificado" ? property.type : "", property.location !== "Ubicación no especificada" ? property.location : ""].filter(Boolean).join(" · ");
-  return [property.title, context, property.description].filter(Boolean).join(". ").replace(/\s+/g, " ").trim().slice(0, 160).trimEnd();
-}
-
 function publishedDate(value: string | null): string | null {
   if (!value) return null;
   const date = new Date(value);
@@ -27,15 +23,12 @@ function publishedDate(value: string | null): string | null {
 
 /** Inicio > Operación > Ciudad > Título: cada nivel abre el mapa con ese filtro ya aplicado. */
 function Breadcrumb({ property }: { property: Listing }) {
-  const operation = property.operation !== "Operación no especificada" ? property.operation : null;
-  const city = listingCity(property);
-  const href = (params: Record<string, string>) => `/?${new URLSearchParams(params)}`;
+  const steps = listingBreadcrumb(property);
   return <nav className="breadcrumb" aria-label="Ruta de navegación">
     <ol>
-      <li><Link href="/"><svg width="15" height="15" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 10.5 12 3l9 7.5" /><path d="M5 9.5V21h14V9.5" /><path d="M10 21v-6h4v6" /></svg>Inicio</Link></li>
-      {operation && <li><Link href={href({ operacion: operation })}>{operation}</Link></li>}
-      {city && <li><Link href={href(operation ? { operacion: operation, ciudad: city } : { ciudad: city })}>{city}</Link></li>}
-      <li className="breadcrumb-current"><span aria-current="page" title={property.title}>{property.title}</span></li>
+      {steps.map((step, index) => step.path
+        ? <li key={step.name + index}><Link href={step.path}>{index === 0 && <svg width="15" height="15" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 10.5 12 3l9 7.5" /><path d="M5 9.5V21h14V9.5" /><path d="M10 21v-6h4v6" /></svg>}{step.name}</Link></li>
+        : <li key="actual" className="breadcrumb-current"><span aria-current="page" title={step.name}>{step.name}</span></li>)}
     </ol>
   </nav>;
 }
@@ -57,13 +50,15 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   const property = await getPublishedListing(slug);
   if (!property) notFound();
   const canonical = `/inmueble/${encodeURIComponent(property.slug || slug)}`;
-  const description = metaDescription(property);
+  const description = listingSeoDescription(property);
   return {
-    title: `${property.title} | Inmuebles Directos`,
+    title: listingSeoTitle(property),
     description,
     alternates: { canonical },
     openGraph: {
       type: "website",
+      siteName: "Inmuebles Directos",
+      locale: "es_PE",
       url: canonical,
       title: property.title,
       description,
@@ -93,6 +88,7 @@ export default async function PropertyPage({ params }: PageProps) {
 
   return <main className="property-full-page">
     <SiteHeader />
+    <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLdText(listingJsonLd(property, listingUrl, siteOrigin())) }} />
     <Breadcrumb property={property} />
     <article className="property-full-shell">
       <PropertyGallery images={property.imageItems} title={property.title} />
