@@ -51,6 +51,8 @@ describe("anunciante en la ficha", () => {
   it("la versión vigente no corta el primer nombre y el nombre largo hace salto de línea", () => {
     const sql = readFileSync("supabase/migrations/20261121130000_listing_publisher_name_full_word.sql", "utf8");
     expect(sql).toMatch(/left\(initcap\(lower\(w\[1\]\)\), 60\)/);
+    // Puntos y guiones separan palabras, para que un nombre sin espacios no se publique entero.
+    expect(sql).toContain("regexp_replace(pr.full_name, '[[:space:].-]+', ' ', 'g')");
     expect(sql).toMatch(/p\.status = 'published'/);
     expect(sql).toMatch(/pr\.full_name ~ '\^\[\[:alpha:\]\[:space:\]''\.-\]\+\$'/);
     expect(sql).not.toMatch(/pr\.(phone|role|avatar_url)/);
