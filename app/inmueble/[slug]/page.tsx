@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { siteOrigin } from "../../lib/auth-origin";
-import Link from "next/link";
+import Breadcrumb from "../../components/Breadcrumb";
 import { formatPrice, isMappable, type Listing } from "../../lib/inventory";
 import { jsonLdText, listingBreadcrumb, listingJsonLd, listingSeoDescription, listingSeoTitle } from "../../lib/listing-seo";
 import { getPublishedListing, getPublisherName } from "../../lib/property";
@@ -19,18 +19,6 @@ function publishedDate(value: string | null): string | null {
   if (!value) return null;
   const date = new Date(value);
   return Number.isNaN(date.valueOf()) ? null : new Intl.DateTimeFormat("es-PE", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" }).format(date);
-}
-
-/** Inicio > Operación > Ciudad > Título: cada nivel abre el mapa con ese filtro ya aplicado. */
-function Breadcrumb({ property }: { property: Listing }) {
-  const steps = listingBreadcrumb(property);
-  return <nav className="breadcrumb" aria-label="Ruta de navegación">
-    <ol>
-      {steps.map((step, index) => step.path
-        ? <li key={step.name + index}><Link href={step.path}>{index === 0 && <svg width="15" height="15" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 10.5 12 3l9 7.5" /><path d="M5 9.5V21h14V9.5" /><path d="M10 21v-6h4v6" /></svg>}{step.name}</Link></li>
-        : <li key="actual" className="breadcrumb-current"><span aria-current="page" title={step.name}>{step.name}</span></li>)}
-    </ol>
-  </nav>;
 }
 
 /** Quién publica: avatar con inicial, nombre abreviado, fecha y sello del portal. */
@@ -89,7 +77,7 @@ export default async function PropertyPage({ params }: PageProps) {
   return <main className="property-full-page">
     <SiteHeader />
     <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLdText(listingJsonLd(property, listingUrl, siteOrigin())) }} />
-    <Breadcrumb property={property} />
+    <Breadcrumb steps={listingBreadcrumb(property)} />
     <article className="property-full-shell">
       <PropertyGallery images={property.imageItems} title={property.title} />
       <div className="property-full-content">
