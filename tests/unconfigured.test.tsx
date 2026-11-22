@@ -1,6 +1,6 @@
 import { expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
-import Home from "../app/page";
+import Home from "../app/HomeClient";
 vi.mock("../app/lib/supabase", () => ({ supabase: null }));
 vi.mock("../app/lib/auth-client", () => ({ getBrowserClient: () => null }));
 it("shows a neutral error without a configured client or demo inventory", async () => {

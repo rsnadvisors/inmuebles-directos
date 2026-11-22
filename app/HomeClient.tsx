@@ -1,0 +1,193 @@
+'use client';
+
+
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
+import Link from "next/link";
+import { getBrowserClient } from "./lib/auth-client";
+import { Listing, compactLocation, comparisonAttributes, filterAndSortListings, formatPrice, isMappable, matchesCity, normalizeInventory, previewLocation, primaryImage, propertyIcon, propertyTypes } from "./lib/inventory";
+import SiteHeader from "./components/SiteHeader";
+import PropertyContactActions from "./components/PropertyContactActions";
+import ListingViewBeacon from "./components/ListingViewBeacon";
+import { trackSearch } from "./lib/listing-events";
+
+const PiuraMap = dynamic(() => import("./PiuraMap"), { ssr: false });
+
+function ListingAttributes({ listing, context }: { listing: Listing; context: "card" | "drawer" }) {
+  const attributes = comparisonAttributes(listing);
+  if (attributes.length === 0) return null;
+  return <div className={`${context}-attributes`} aria-label="Características de la propiedad">{attributes.map(attribute => (
+    <span key={attribute.key} className={`property-attribute property-attribute-${attribute.key}`} aria-label={attribute.label}>
+      <span aria-hidden="true">{attribute.icon}</span><span aria-hidden="true">{attribute.shortLabel}</span>
+    </span>
+  ))}</div>;
+}
+
+/** Mapa interactivo del inicio. `initialListings` llega ya leído en el servidor, para que Google vea el listado y sus enlaces. */
+export default function Home({ initialListings }: { initialListings?: Listing[] } = {}) {
+  const [allListings, setAllListings] = useState<Listing[]>(() => initialListings ?? []);
+  const [inventoryState, setInventoryState] = useState<"loading" | "success" | "error">(() => initialListings ? "success" : "loading");
+  const [query, setQuery] = useState(""); // lo que se está escribiendo
+  const [appliedQuery, setAppliedQuery] = useState(""); // búsqueda ya ejecutada (chip), con el campo otra vez vacío
+  // Mientras se escribe, filtra en vivo; con el campo vacío, sigue aplicando la última búsqueda ejecutada.
+  const activeQuery = query.trim() ? query : appliedQuery;
+  const submitSearch = () => { const value = query.trim(); if (!value) return; setAppliedQuery(value); setQuery(""); };
+  const [city, setCity] = useState(""); // filtro exacto por ciudad, llega desde la ruta de navegación de la ficha
+  const clearSearch = () => { setQuery(""); setAppliedQuery(""); setCity(""); };
+  const [operation, setOperation] = useState("Todo");
+  const [type, setType] = useState("Todo");
+  const [sort, setSort] = useState("recommended");
+  const [selected, setSelected] = useState<Listing | null>(null);
+  const [mobileList, setMobileList] = useState(false);
+  const [mobileFilters, setMobileFilters] = useState(false);
+  const [galleryIndex, setGalleryIndex] = useState(0);
+  const [galleryOpen, setGalleryOpen] = useState(false);
+  const [mapResetKey, setMapResetKey] = useState(0);
+  const drawerCloseRef = useRef<HTMLButtonElement>(null);
+  const drawerTriggerRef = useRef<HTMLElement | null>(null);
+
+  const openDrawer = useCallback((listing: Listing, trigger: HTMLElement | null = null) => {
+    drawerTriggerRef.current = trigger;
+    setSelected(listing);
+  }, []);
+
+  const closeDrawer = useCallback((returnToMap = false) => {
+    const trigger = drawerTriggerRef.current;
+    setSelected(null);
+    if (returnToMap) {
+      setMobileList(false);
+      setMapResetKey((key) => key + 1);
+    }
+    window.setTimeout(() => {
+      if (trigger?.isConnected) trigger.focus();
+      drawerTriggerRef.current = null;
+    }, 0);
+  }, []);
+
+  useEffect(() => {
+    const supabase = getBrowserClient();
+    if (!supabase) { setInventoryState("error"); return; }
+    let active = true;
+    let requestSequence = 0;
+    // Con datos del servidor, la primera lectura solo refresca en silencio (sin vaciar el listado ni mostrar «Cargando…»).
+    let quiet = initialListings !== undefined;
+    const load = async () => {
+      const request = ++requestSequence;
+      if (!quiet) {
+        setInventoryState("loading");
+        setAllListings([]);
+        setSelected(null);
+      }
+      quiet = false;
+      try {
+        const { data, error } = await supabase.from("properties").select("id,title,slug,status,contact_phone,listing_type,property_type,price,currency,area_total_m2,address,district,city,region,country,description,bedrooms,bathrooms,parking_spaces,lat,lng,published_at,is_reserved,property_images(id,storage_bucket,public_url,alt_text,sort_order,is_cover)").eq("status", "published");
+        if (!active || request !== requestSequence) return;
+        if (error) throw error;
+        setAllListings(normalizeInventory(data));
+        setInventoryState("success");
+      } catch {
+        if (!active || request !== requestSequence) return;
+        setAllListings([]);
+        setInventoryState("error");
+      }
+    };
+    load();
+    const channel = supabase.channel("properties-map").on("postgres_changes", { event: "*", schema: "public", table: "properties" }, load).subscribe();
+    return () => { active = false; supabase.removeChannel(channel); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- solo al montar; initialListings es el punto de partida
+  }, []);
+
+  // Enlaces de la ruta de navegación de la ficha: /?operacion=Comprar&ciudad=Piura. Se leen una vez y la URL queda limpia.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const wantedOperation = params.get("operacion");
+    const wantedCity = params.get("ciudad")?.trim().slice(0, 120) ?? "";
+    if (wantedOperation === "Comprar" || wantedOperation === "Alquilar") setOperation(wantedOperation);
+    if (wantedCity) setCity(wantedCity);
+    if (params.has("operacion") || params.has("ciudad")) window.history.replaceState(window.history.state, "", window.location.pathname);
+  }, []);
+
+  useEffect(() => { setGalleryIndex(0); setGalleryOpen(false); }, [selected?.id]);
+
+  useEffect(() => {
+    if (!selected) return;
+    drawerCloseRef.current?.focus();
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      if (galleryOpen) setGalleryOpen(false);
+      else closeDrawer();
+    };
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [selected, galleryOpen, closeDrawer]);
+
+  const filtered = useMemo(() => filterAndSortListings(city ? allListings.filter(item => matchesCity(item, city)) : allListings, activeQuery, operation, type, sort), [allListings, city, activeQuery, operation, type, sort]);
+  // Aggregated demand signal (no free text leaves the browser): once the filters settle for 1.5 s.
+  useEffect(() => {
+    if (inventoryState !== "success") return;
+    const timer = window.setTimeout(() => trackSearch(operation, type, activeQuery, filtered.length), 1500);
+    return () => window.clearTimeout(timer);
+  }, [inventoryState, operation, type, activeQuery, filtered.length]);
+  useEffect(() => {
+    if (selected && !filtered.some(item => item.id === selected.id)) setSelected(null);
+  }, [filtered, selected]);
+
+  return (
+    <main className="geo-app">
+      <SiteHeader query={query} onQueryChange={setQuery} onQuerySubmit={submitSearch} mobileFilters={mobileFilters} onMobileFiltersChange={setMobileFilters} />
+
+      <div className="quick-filters" aria-label="Filtros rápidos">
+        {["Todo", "Comprar", "Alquilar", ...propertyTypes].map((filter) => (
+          <button key={filter} className={(filter === "Todo" ? operation === "Todo" && type === "Todo" : operation === filter || type === filter) ? "active" : ""} onClick={() => {
+            if (filter === "Todo") { setOperation("Todo"); setType("Todo"); }
+            else if (filter === "Comprar" || filter === "Alquilar") setOperation(filter);
+            else setType(filter);
+          }}>{filter}</button>
+        ))}
+      </div>
+
+      {mobileFilters && <section className="mobile-filter-sheet" aria-label="Filtros de propiedades"><div className="mobile-filter-head"><strong>Filtrar propiedades</strong><button type="button" onClick={() => setMobileFilters(false)} aria-label="Cerrar filtros">×</button></div><div className="mobile-filter-options"><strong>Operación</strong>{["Todo", "Comprar", "Alquilar"].map((value) => <button key={value} type="button" className={operation === value ? "active" : ""} onClick={() => setOperation(value)}>{value}</button>)}<strong>Tipo</strong>{["Todo", ...propertyTypes].map((value) => <button key={value} type="button" className={type === value ? "active" : ""} onClick={() => setType(value)}>{value}</button>)}<button type="button" onClick={() => { clearSearch(); setOperation("Todo"); setType("Todo"); }}>Limpiar filtros</button></div></section>}
+
+      <section id="explorar" className="explorer">
+        <aside className={`results-panel ${mobileList ? "mobile-open" : ""}`}>
+          <div className="results-head"><div><h1 className="results-title">Inmuebles en venta y alquiler en Piura</h1><strong>{filtered.length} propiedades encontradas</strong><span>Total de propiedades: {allListings.length}</span></div><button className="close-mobile" onClick={() => setMobileList(false)} aria-label="Cerrar listado">×</button></div>
+          <div className="results-tools"><select value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Ordenar propiedades"><option value="recommended">Orden predeterminado</option><option value="recent">Más recientes</option><option value="priceAsc">Menor precio por moneda</option><option value="priceDesc">Mayor precio por moneda</option></select><button className="advanced" onClick={() => { setOperation("Todo"); setType("Todo"); clearSearch(); setSort("recommended"); }}>Limpiar filtros</button></div>
+          <div className="listing-list">
+            {inventoryState !== "success" ? <div className="empty-state" role={inventoryState === "error" ? "alert" : "status"}>{inventoryState === "loading" ? "Cargando propiedades…" : "No pudimos cargar las propiedades en este momento."}</div> : allListings.length === 0 ? <div className="empty-state">No hay propiedades disponibles en este momento.</div> : filtered.length === 0 ? <div className="empty-state">No encontramos propiedades con esos filtros.</div> : filtered.map((item) => (
+              <article className={`listing-card ${selected?.id === item.id ? "selected" : ""}`} key={item.id}>
+                <div className={`listing-photo ${primaryImage(item) ? "" : "listing-photo-empty"}`}>{primaryImage(item) ? <img src={primaryImage(item)!.url} alt="" loading="lazy" /> : <><span aria-hidden="true">{propertyIcon(item.type)}</span><small>Sin fotografía</small></>}<b>{item.operation}</b>{item.reserved && <b className="listing-reserved">Reservado</b>}</div>
+                <div className="listing-content"><div className="listing-price">{formatPrice(item.price, item.currency)}</div><h2><a className="listing-title-link" href={item.slug ? `/inmueble/${item.slug}` : undefined} onClick={(event) => {
+                  // Clic normal: abre el panel como siempre. Ctrl/Cmd/clic central: la ficha en otra pestaña. Google sigue el enlace.
+                  if (!item.slug || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                  event.preventDefault(); openDrawer(item, event.currentTarget);
+                }}>{item.title}</a></h2><p>{compactLocation(item)}</p><div className="listing-type">{item.type}</div><ListingAttributes listing={item} context="card" /><button className="detail-link" type="button" onClick={(event) => openDrawer(item, event.currentTarget)}>Ver detalles</button></div>
+              </article>
+            ))}
+          </div>
+        </aside>
+        <section className="map-panel">{appliedQuery && !query.trim() ? <div className="search-chip" role="status">
+          <span>Resultados para <b>«{appliedQuery}»</b>{city && <> en <b>{city}</b></>}</span>
+          <button type="button" onClick={() => setAppliedQuery("")} aria-label={`Quitar la búsqueda «${appliedQuery}»`}>×</button></div>
+          : city && <div className="search-chip" role="status">
+          <span>Propiedades en <b>{city}</b></span>
+          <button type="button" onClick={() => setCity("")} aria-label={`Quitar el filtro de ciudad ${city}`}>×</button></div>}<PiuraMap properties={filtered.filter(isMappable)} resetViewKey={mapResetKey} layoutKey={`${mobileList}:${!!selected}`} onSelect={(item) => openDrawer(item)} />{!selected && <button className="mobile-list-toggle" aria-label={`Mostrar lista de ${filtered.length} propiedades`} onClick={() => setMobileList(true)}><span aria-hidden="true">☷</span> {filtered.length} propiedades</button>}</section>
+      </section>
+
+      {selected && <div className="property-drawer" role="dialog" aria-label={`Ficha de ${selected.title}`}>
+        <button ref={drawerCloseRef} className="drawer-close" type="button" onClick={() => closeDrawer()} aria-label="Cerrar detalle de propiedad" title="Cerrar">×</button>
+        {/* Solo se desplaza el contenido: el botón × queda fijo sobre la esquina de la foto en escritorio y en móvil. */}
+        <div className="drawer-scroll">
+        {selected.images.length > 0 ? <div className="drawer-gallery"><button className="drawer-main-image" type="button" onClick={() => setGalleryOpen(true)} aria-label="Ampliar galería"><img src={selected.images[galleryIndex]} alt={selected.title} /><span>{galleryIndex + 1} / {selected.images.length}</span></button><div>{selected.images.slice(0, 5).map((image, index) => <button key={image} type="button" aria-label={`Ver imagen ${index + 1}`} className={galleryIndex === index ? "active" : ""} onClick={() => setGalleryIndex(index)}><img src={image} alt="" /></button>)}</div></div> : <div className="drawer-media-empty"><span aria-hidden="true">{propertyIcon(selected.type)}</span><strong>Sin fotografías disponibles</strong></div>}
+        <div className="drawer-kicker">{selected.operation} · {selected.type}{selected.reserved && <span className="reserved-badge">Reservado</span>}</div><h2>{selected.title}</h2><div className="drawer-price">{formatPrice(selected.price, selected.currency)}</div>
+        {selected.description && <p className="drawer-description">{selected.description}</p>}
+        <div className="drawer-location"><span aria-hidden="true">⌖</span> {previewLocation(selected)}</div><ListingAttributes listing={selected} context="drawer" />
+        <div className="drawer-actions">{selected.slug && <Link className="drawer-primary-action" href={`/inmueble/${selected.slug}`}>Ficha completa</Link>}{selected.coords && <button className="drawer-secondary-action" type="button" onClick={() => closeDrawer(true)}>Ver mapa</button>}</div>
+        <PropertyContactActions phone={selected.contactPhone} title={selected.title} status={selected.status} listingId={selected.id} /><ListingViewBeacon id={selected.id} />
+        </div>
+      </div>}
+      {selected && galleryOpen && <div className="gallery-modal" role="dialog" aria-modal="true" aria-label={`Galería de ${selected.title}`}><button type="button" className="gallery-modal-close" onClick={() => setGalleryOpen(false)} aria-label="Cerrar galería">×</button><button type="button" className="gallery-prev" onClick={() => setGalleryIndex((galleryIndex - 1 + selected.images.length) % selected.images.length)} aria-label="Imagen anterior">‹</button><img src={selected.images[galleryIndex]} alt={selected.title} /><button type="button" className="gallery-next" onClick={() => setGalleryIndex((galleryIndex + 1) % selected.images.length)} aria-label="Imagen siguiente">›</button><span>{galleryIndex + 1} / {selected.images.length}</span></div>}
+    </main>
+  );
+}
+
+
