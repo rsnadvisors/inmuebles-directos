@@ -51,3 +51,21 @@ describe("inicio generado en el servidor (SEO C2)", () => {
     expect((await screen.findByRole("alert")).textContent).toBe("No pudimos cargar las propiedades en este momento.");
   });
 });
+
+describe("SEO A5–A6", () => {
+  it("el inicio tiene imagen para compartir 1200×630 y tarjeta grande", async () => {
+    const { existsSync } = await import("node:fs");
+    const og = metadata.openGraph as { images: Array<{ url: string; width: number; height: number; alt: string }> };
+    expect(og.images[0]).toMatchObject({ url: "/og-inicio.jpg", width: 1200, height: 630 });
+    expect(og.images[0].alt).toMatch(/Piura/);
+    expect(existsSync("public/og-inicio.jpg")).toBe(true);
+    expect(metadata.twitter).toMatchObject({ card: "summary_large_image", images: ["/og-inicio.jpg"] });
+  });
+
+  it("login y registro no se indexan pero sus enlaces se siguen", async () => {
+    const login = (await import("../app/login/page")).metadata;
+    const register = (await import("../app/registro/page")).metadata;
+    expect(login).toMatchObject({ title: "Iniciar sesión | Inmuebles Directos", robots: { index: false, follow: true } });
+    expect(register).toMatchObject({ title: "Crear cuenta | Inmuebles Directos", robots: { index: false, follow: true } });
+  });
+});
