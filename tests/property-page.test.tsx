@@ -73,12 +73,19 @@ describe("canonical property page", () => {
     expect(screen.queryByRole("button", { name: "Imagen siguiente" })).toBeNull();
   });
 
-  it("navigates multiple ordered images and falls back to the property title for alt", () => {
-    render(<PropertyGallery title="Casa real" images={[{ url: "cover.jpg", altText: null }, { url: "second.jpg", altText: "Interior" }]} />);
-    expect(screen.getByAltText("Casa real")).toBeTruthy();
+  it("navigates multiple ordered images and builds a descriptive fallback alt", () => {
+    render(<PropertyGallery title="Casa real" context="Casa en venta en Los Ejidos, Piura" images={[{ url: "cover.jpg", altText: null }, { url: "second.jpg", altText: "Interior" }]} />);
+    const cover = screen.getByAltText("Casa real – Casa en venta en Los Ejidos, Piura, foto 1 de 2");
+    expect(cover.getAttribute("width")).toBe("1200");
+    expect(cover.getAttribute("height")).toBe("900");
+    expect(cover.getAttribute("fetchpriority")).toBe("high");
     expect(screen.getByText("1 / 2")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Imagen siguiente" }));
     expect(screen.getByAltText("Interior")).toBeTruthy();
     expect(screen.getByText("2 / 2")).toBeTruthy();
+  });
+  it("una sola foto sin texto del anunciante usa título y contexto, sin numerar", () => {
+    render(<PropertyGallery title="Lote" context="Terreno en venta en Castilla, Piura" images={[{ url: "a.jpg", altText: null }]} />);
+    expect(screen.getByAltText("Lote – Terreno en venta en Castilla, Piura")).toBeTruthy();
   });
 });
