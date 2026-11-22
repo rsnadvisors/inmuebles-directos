@@ -124,7 +124,7 @@ export default function PublishPage() {
         setPublishedSlug(typeof result.slug === "string" ? result.slug : null);
         setStatus(result.imageDelivery === "unconfirmed"
           ? "Propiedad publicada. No pudimos confirmar la imagen; revísala en Mis propiedades. No vuelvas a publicarla."
-          : "Propiedad publicada. Puedes verla en Mis propiedades.");
+          : "Propiedad publicada. Su ficha ya está visible; en el mapa del inicio puede tardar hasta un minuto en aparecer.");
       } else if (result.ok === false && ["CAPTCHA_FAILED", "CAPTCHA_UNAVAILABLE", "PUBLICATION_DAILY_LIMIT", "VALIDATION_ERROR", "INVALID_REQUEST", "INVALID_CONTENT_TYPE", "INVALID_ORIGIN", "REQUEST_TOO_LARGE", "PUBLICATION_FAILED"].includes(result.code)) {
         recovery.publicationUncertain(operation);
         setStatus(typeof result.message === "string" ? result.message : "No se pudo completar la publicación.");

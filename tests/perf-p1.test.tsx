@@ -34,14 +34,14 @@ describe("rendimiento P1", () => {
     expect(readFileSync("wrangler.jsonc", "utf8")).toMatch(/"images": \{ "binding": "IMAGES" \}/);
   });
 
-  it("P1c: redimensiona a WebP sin caché compartida y vuelve al original si el binding falla o no existe", async () => {
+  it("P1c: redimensiona a WebP con caché privada y vuelve al original si el binding falla o no existe", async () => {
     const blob = new Blob([new Uint8Array([1, 2, 3])], { type: "image/jpeg" });
     const transform = vi.fn(() => ({ output: vi.fn(async () => ({ response: (options?: { headers?: HeadersInit }) => new Response("webp", { headers: { "Content-Type": "image/webp", ...options?.headers } }) })) }));
     const images = { input: vi.fn(() => ({ transform })) } as unknown as ImagesBinding;
     const response = (await resizedImageResponse(blob, 320, images))!;
     expect(transform).toHaveBeenCalledWith({ width: 320, fit: "scale-down" });
     expect(response.headers.get("Content-Type")).toBe("image/webp");
-    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(response.headers.get("Cache-Control")).toBe("private, max-age=600"); // P2a: solo en el navegador
     expect(await resizedImageResponse(blob, 320, undefined)).toBeNull();
     const broken = { input: () => { throw new Error("9422"); } } as unknown as ImagesBinding;
     expect(await resizedImageResponse(blob, 320, broken)).toBeNull();

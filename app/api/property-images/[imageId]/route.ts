@@ -1,5 +1,5 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
-import { anonymousImageClient, imageResponse, loadPublishedPrivateImage, resizedImageResponse, validImageId, type ImagesBinding } from "../../../lib/property-images";
+import { anonymousImageClient, imageResponse, loadPublishedPrivateImage, PUBLISHED_IMAGE_CACHE, resizedImageResponse, validImageId, type ImagesBinding } from "../../../lib/property-images";
 import { IMAGE_WIDTHS, type ImageWidth } from "../../../lib/property-image-source";
 
 /** Binding IMAGES de Cloudflare, si existe (en desarrollo local y en pruebas no hay). */
@@ -23,7 +23,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ imag
     if (!blob) return new Response(null, { status: 404, headers: { "Cache-Control": "no-store" } });
     // La autorización (anuncio publicado, ruta válida) ya se comprobó al cargar la foto; solo cambia el tamaño.
     const resized = width ? await resizedImageResponse(blob, width, imagesBinding()) : null;
-    return resized ?? imageResponse(blob, "no-store");
+    return resized ?? imageResponse(blob, PUBLISHED_IMAGE_CACHE);
   } catch {
     return new Response(null, { status: 503, headers: { "Cache-Control": "no-store" } });
   }

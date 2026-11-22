@@ -41,7 +41,8 @@ describe("public delivery checks metadata before fetching bytes", () => {
     expect(download).toHaveBeenCalledWith(PATH);
     expect(response.headers.get("Content-Type")).toBe("image/png");
     expect(response.headers.get("Content-Length")).toBe("3");
-    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    // P2a: caché solo del navegador de quien la vio; nunca pública ni compartida.
+    expect(response.headers.get("Cache-Control")).toBe("private, max-age=600");
     expect(response.headers.get("X-Content-Type-Options")).toBe("nosniff");
   });
 

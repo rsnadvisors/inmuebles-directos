@@ -30,6 +30,14 @@ export async function loadPublishedPrivateImage(client: SupabaseClient, imageId:
   return downloaded.data;
 }
 
+/**
+ * Caché de una foto ya autorizada (rendimiento P2a, decidido por el titular el 22/11/2026): solo en el navegador
+ * de quien la vio (private), 10 minutos. Ningún servidor o CDN intermedio la guarda, así que un visitante nuevo
+ * nunca ve la foto de un anuncio archivado; quien ya la había visto puede conservarla en su equipo hasta 10 min.
+ * Errores y fotos no publicadas siguen con no-store.
+ */
+export const PUBLISHED_IMAGE_CACHE = "private, max-age=600";
+
 /** Mínimo de la API de imágenes de Cloudflare que usamos (binding IMAGES del Worker). */
 export type ImagesBinding = {
   input(stream: ReadableStream): {
@@ -40,15 +48,14 @@ export type ImagesBinding = {
 };
 
 /**
- * Foto ya autorizada, redimensionada a `width` y convertida a WebP. Mantiene no-store (la frontera de seguridad:
- * un anuncio archivado deja de servir fotos al instante). Si el binding no existe (desarrollo local, pruebas) o
+ * Foto ya autorizada, redimensionada a `width` y convertida a WebP, con la misma caché privada que el original. Si el binding no existe (desarrollo local, pruebas) o
  * falla (p. ej. límite mensual de transformaciones), devuelve null y la ruta sirve el original.
  */
 export async function resizedImageResponse(blob: Blob, width: number, images: ImagesBinding | undefined): Promise<Response | null> {
   if (!images) return null;
   try {
     const result = await images.input(blob.stream()).transform({ width, fit: "scale-down" }).output({ format: "image/webp", quality: 78 });
-    const response = result.response({ headers: { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } });
+    const response = result.response({ headers: { "Cache-Control": PUBLISHED_IMAGE_CACHE, "X-Content-Type-Options": "nosniff" } });
     return response.ok ? response : null;
   } catch {
     return null;

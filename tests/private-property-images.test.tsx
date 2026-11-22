@@ -14,6 +14,8 @@ vi.mock("../app/lib/property-images", () => ({
   validImageId: (value: string) => /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(value),
   anonymousImageClient: mock.anon,
   loadPublishedPrivateImage: mock.publicLoad,
+  PUBLISHED_IMAGE_CACHE: "private, max-age=600",
+  resizedImageResponse: async () => null,
   imageResponse: (blob: Blob, cache: string) => new Response(blob, {
     headers: { "Content-Type": blob.type, "Cache-Control": cache, "X-Content-Type-Options": "nosniff" },
   }),
@@ -82,11 +84,12 @@ describe("canonical private image path", () => {
 });
 
 describe("public image delivery", () => {
-  it("returns a published image with no-store and correct MIME", async () => {
+  it("returns a published image with private browser-only cache and correct MIME", async () => {
     const response = await publicImage(new Request("http://localhost/image"), context());
     expect(response.status).toBe(200);
     expect(response.headers.get("Content-Type")).toBe("image/png");
-    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(response.headers.get("Cache-Control")).toBe("private, max-age=600");
+    expect(response.headers.get("Cache-Control")).not.toMatch(/public|s-maxage/);
     expect(response.headers.get("X-Content-Type-Options")).toBe("nosniff");
   });
   it("hides drafts and invalid IDs", async () => {
