@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
-import Home from "../app/page";
+import Home from "../app/HomeClient";
 import { compactLocation, comparisonAttributes, coordinates, formatPrice, normalizeListing, optionalNumber, previewLocation, primaryImage } from "../app/lib/inventory";
 import { properties } from "./fixtures/properties";
 import { refreshInventory, setInventory, setResponse } from "./mocks/supabase";

@@ -2,7 +2,7 @@ import { act, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import PropertyPage from "../app/inmueble/[slug]/page";
-import Home from "../app/page";
+import Home from "../app/HomeClient";
 import { listingCity, matchesCity, normalizeInventory } from "../app/lib/inventory";
 import { properties } from "./fixtures/properties";
 import { setInventory } from "./mocks/supabase";

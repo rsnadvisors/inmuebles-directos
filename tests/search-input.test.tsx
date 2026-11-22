@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import Home from "../app/page";
+import Home from "../app/HomeClient";
 
 vi.mock("../app/lib/auth-client", async () => {
   const { supabase } = await import("./mocks/supabase");

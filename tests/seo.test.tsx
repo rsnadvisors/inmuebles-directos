@@ -8,7 +8,7 @@ describe("SEO para Search Console", () => {
   it("robots permite el sitio público, bloquea lo privado y apunta al sitemap del dominio", () => {
     const r = robots();
     const rule = Array.isArray(r.rules) ? r.rules[0] : r.rules;
-    expect(rule.allow).toBe("/");
+    expect(rule.allow).toEqual(["/", "/api/property-images/"]);
     for (const path of ["/api/", "/admin", "/cuenta", "/mis-propiedades", "/publicar"]) expect(rule.disallow).toContain(path);
     expect(r.sitemap).toBe("https://inmueblesdirectosperu.com/sitemap.xml");
   });

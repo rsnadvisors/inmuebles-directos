@@ -4,7 +4,7 @@ import { normalizeContactPhone, propertyContactLinks } from "../app/lib/contact-
 import { normalizeListing } from "../app/lib/inventory";
 import PropertyContactActions from "../app/components/PropertyContactActions";
 import PropertyPage from "../app/inmueble/[slug]/page";
-import Home from "../app/page";
+import Home from "../app/HomeClient";
 import { properties } from "./fixtures/properties";
 import { setInventory } from "./mocks/supabase";
 
