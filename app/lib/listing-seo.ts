@@ -1,4 +1,5 @@
 import { formatPrice, listingCity, type Listing } from "./inventory";
+import { landingPath, operationSlug } from "./landing";
 
 /**
  * SEO de la ficha y del sitio (auditoría 22/11/2026, A1–A3): título y descripción para Google y datos
@@ -95,13 +96,14 @@ type BreadcrumbStep = { name: string; path?: string };
 
 /** Niveles de la ruta de navegación visible de la ficha; el JSON-LD usa los mismos. */
 export function listingBreadcrumb(property: Listing): BreadcrumbStep[] {
-  const operation = property.operation !== "Operación no especificada" ? property.operation : null;
+  // Cada nivel enlaza a su página por operación y ciudad (/venta, /venta/piura), que siempre existe porque
+  // este mismo anuncio publicado la alimenta. Sin operación conocida no hay página a la que enlazar.
+  const op = operationSlug(property.operation);
   const city = listingCity(property);
-  const query = (params: Record<string, string>) => `/?${new URLSearchParams(params)}`;
   return [
     { name: "Inicio", path: "/" },
-    ...(operation ? [{ name: operation, path: query({ operacion: operation }) }] : []),
-    ...(city ? [{ name: city, path: query(operation ? { operacion: operation, ciudad: city } : { ciudad: city }) }] : []),
+    ...(op ? [{ name: property.operation, path: landingPath(op) }] : []),
+    ...(op && city ? [{ name: city, path: landingPath(op, city) }] : []),
     { name: property.title },
   ];
 }

@@ -22,13 +22,13 @@ async function renderPage(row: Record<string, unknown>) {
 }
 
 describe("ruta de navegación de la ficha", () => {
-  it("muestra Inicio > Operación > Ciudad > Título con enlaces filtrados", async () => {
+  it("muestra Inicio > Operación > Ciudad > Título con enlaces a las páginas por zona", async () => {
     const nav = await renderPage({ city: "Piura" });
     const items = within(nav).getAllByRole("listitem").map(item => item.textContent);
     expect(items).toEqual(["Inicio", "Comprar", "Piura", "Casa de prueba"]);
     expect(within(nav).getByRole("link", { name: "Inicio" }).getAttribute("href")).toBe("/");
-    expect(within(nav).getByRole("link", { name: "Comprar" }).getAttribute("href")).toBe("/?operacion=Comprar");
-    expect(within(nav).getByRole("link", { name: "Piura" }).getAttribute("href")).toBe("/?operacion=Comprar&ciudad=Piura");
+    expect(within(nav).getByRole("link", { name: "Comprar" }).getAttribute("href")).toBe("/venta");
+    expect(within(nav).getByRole("link", { name: "Piura" }).getAttribute("href")).toBe("/venta/piura");
     const current = within(nav).getByText("Casa de prueba");
     expect(current.getAttribute("aria-current")).toBe("page");
     expect(current.closest("a")).toBeNull();
@@ -38,7 +38,7 @@ describe("ruta de navegación de la ficha", () => {
 
   it("usa el departamento si falta la ciudad y codifica nombres con espacios", async () => {
     const nav = await renderPage({ city: null, region: "La Libertad", listing_type: "rent" });
-    expect(within(nav).getByRole("link", { name: "La Libertad" }).getAttribute("href")).toBe("/?operacion=Alquilar&ciudad=La+Libertad");
+    expect(within(nav).getByRole("link", { name: "La Libertad" }).getAttribute("href")).toBe("/alquiler/la-libertad");
   });
 
   it("omite los niveles sin dato", async () => {
