@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { siteOrigin } from "../../lib/auth-origin";
-import { formatPrice, isMappable, type Listing } from "../../lib/inventory";
+import Link from "next/link";
+import { formatPrice, isMappable, listingCity, type Listing } from "../../lib/inventory";
 import { getPublishedListing } from "../../lib/property";
 import PropertyGallery from "./PropertyGallery";
 import PropertyMap from "./PropertyMap";
@@ -22,6 +23,21 @@ function publishedDate(value: string | null): string | null {
   if (!value) return null;
   const date = new Date(value);
   return Number.isNaN(date.valueOf()) ? null : new Intl.DateTimeFormat("es-PE", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" }).format(date);
+}
+
+/** Inicio > Operación > Ciudad > Título: cada nivel abre el mapa con ese filtro ya aplicado. */
+function Breadcrumb({ property }: { property: Listing }) {
+  const operation = property.operation !== "Operación no especificada" ? property.operation : null;
+  const city = listingCity(property);
+  const href = (params: Record<string, string>) => `/?${new URLSearchParams(params)}`;
+  return <nav className="breadcrumb" aria-label="Ruta de navegación">
+    <ol>
+      <li><Link href="/"><svg width="15" height="15" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 10.5 12 3l9 7.5" /><path d="M5 9.5V21h14V9.5" /><path d="M10 21v-6h4v6" /></svg>Inicio</Link></li>
+      {operation && <li><Link href={href({ operacion: operation })}>{operation}</Link></li>}
+      {city && <li><Link href={href(operation ? { operacion: operation, ciudad: city } : { ciudad: city })}>{city}</Link></li>}
+      <li className="breadcrumb-current"><span aria-current="page" title={property.title}>{property.title}</span></li>
+    </ol>
+  </nav>;
 }
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
@@ -64,6 +80,7 @@ export default async function PropertyPage({ params }: PageProps) {
 
   return <main className="property-full-page">
     <SiteHeader />
+    <Breadcrumb property={property} />
     <article className="property-full-shell">
       <PropertyGallery images={property.imageItems} title={property.title} />
       <div className="property-full-content">
