@@ -6,7 +6,9 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
 import { formatPrice, propertyIcon, MappableListing as Property } from "./lib/inventory";
-type Props = { properties?: Property[]; onSelect?: (property: Property) => void; resetViewKey?: number; layoutKey?: string; center?: [number, number] };
+type Props = { properties?: Property[]; onSelect?: (property: Property) => void; resetViewKey?: number; layoutKey?: string; center?: [number, number];
+  /** Se llama cuando terminan de cargar las imágenes del mapa (la portada retira entonces su imagen estática). */
+  onReady?: () => void };
 const piura: [number, number] = [-5.1945, -80.6328];
 
 function iconFor(property: Property) {
@@ -72,12 +74,13 @@ function FitToResults({ properties }: { properties: Property[] }) {
   return null;
 }
 
-export default function PiuraMap({ properties = [], onSelect, resetViewKey, layoutKey, center = piura }: Props) {
+export default function PiuraMap({ properties = [], onSelect, resetViewKey, layoutKey, center = piura, onReady }: Props) {
   const [satellite, setSatellite] = useState(false);
   const shown = properties;
   return <div className="leaflet-map" aria-label="Mapa interactivo de propiedades en Perú">
     <MapContainer center={center} zoom={13} scrollWheelZoom className="leaflet-map-canvas">
-      <TileLayer attribution={satellite ? '&copy; Esri' : '&copy; OpenStreetMap contributors'} url={satellite ? "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}" : "https://tile.openstreetmap.org/{z}/{x}/{y}.png"} />
+      <TileLayer attribution={satellite ? '&copy; Esri' : '&copy; OpenStreetMap contributors'} url={satellite ? "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}" : "https://tile.openstreetmap.org/{z}/{x}/{y}.png"}
+        eventHandlers={{ load: () => onReady?.() }} />
       {shown.map((property) => <Marker key={property.id} position={property.coords} icon={iconFor(property)} eventHandlers={{ click: () => onSelect?.(property) }}><Popup><strong>{property.title}</strong><br />{property.operation} · {property.type} · {formatPrice(property.price, property.currency)}</Popup></Marker>)}
       <LocateButton />
       <ResetViewOnClose resetViewKey={resetViewKey} />
