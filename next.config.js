@@ -15,6 +15,8 @@ const securityHeaders = [
 
 const nextConfig = {
   poweredByHeader: false,
+  // Rendimiento P3b: el CSS (≈10 KB comprimido) va dentro del HTML; el navegador pinta sin esperar otra petición.
+  experimental: { inlineCss: true },
   async headers() {
     return [{
       source: "/:path*",

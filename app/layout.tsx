@@ -6,7 +6,8 @@ import "./globals.css";
 
 // Fuentes servidas desde el propio dominio (next/font las descarga al compilar): sin la cadena bloqueante
 // CSS → fonts.googleapis.com → fonts.gstatic.com y sin saltos de diseño gracias al tamaño de respaldo ajustado.
-const ui = Plus_Jakarta_Sans({ subsets: ["latin"], weight: ["400", "500", "600", "700", "800"], variable: "--font-ui", display: "swap" });
+// Sin «weight»: Google sirve la versión variable (un solo archivo para 400–800 en lugar de cinco). Rendimiento P3a.
+const ui = Plus_Jakarta_Sans({ subsets: ["latin"], variable: "--font-ui", display: "swap" });
 const meta = DM_Mono({ subsets: ["latin"], weight: ["400", "500"], variable: "--font-meta", display: "swap" });
 
 export const metadata: Metadata = {

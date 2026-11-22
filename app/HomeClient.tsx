@@ -48,6 +48,7 @@ export default function Home({ initialListings }: { initialListings?: Listing[] 
   const [galleryIndex, setGalleryIndex] = useState(0);
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [mapResetKey, setMapResetKey] = useState(0);
+  const [mapReady, setMapReady] = useState(false);
   const drawerCloseRef = useRef<HTMLButtonElement>(null);
   const drawerTriggerRef = useRef<HTMLElement | null>(null);
 
@@ -185,7 +186,11 @@ export default function Home({ initialListings }: { initialListings?: Listing[] 
           <button type="button" onClick={() => setAppliedQuery("")} aria-label={`Quitar la búsqueda «${appliedQuery}»`}>×</button></div>
           : city && <div className="search-chip" role="status">
           <span>Propiedades en <b>{city}</b></span>
-          <button type="button" onClick={() => setCity("")} aria-label={`Quitar el filtro de ciudad ${city}`}>×</button></div>}<PiuraMap properties={filtered.filter(isMappable)} resetViewKey={mapResetKey} layoutKey={`${mobileList}:${!!selected}`} onSelect={(item) => openDrawer(item)} />{!selected && <button className="mobile-list-toggle" aria-label={`Mostrar lista de ${filtered.length} propiedades`} onClick={() => setMobileList(true)}><span aria-hidden="true">☷</span> {filtered.length} propiedades</button>}</section>
+          <button type="button" onClick={() => setCity("")} aria-label={`Quitar el filtro de ciudad ${city}`}>×</button></div>}{/* Rendimiento P3c: foto fija del mismo mapa (Piura, zoom 13, mismo centro y escala) mientras carga Leaflet.
+            Se pinta con el HTML y desaparece cuando el mapa interactivo terminó de cargar sus imágenes. */}
+          {!mapReady && <picture><source media="(max-width: 800px)" srcSet="/mapa-piura-movil.webp" width={480} height={900} />
+            <img className="map-placeholder" src="/mapa-piura.webp" alt="" width={1600} height={1000} fetchPriority="high" decoding="async" /></picture>}
+          <PiuraMap onReady={() => setMapReady(true)} properties={filtered.filter(isMappable)} resetViewKey={mapResetKey} layoutKey={`${mobileList}:${!!selected}`} onSelect={(item) => openDrawer(item)} />{!selected && <button className="mobile-list-toggle" aria-label={`Mostrar lista de ${filtered.length} propiedades`} onClick={() => setMobileList(true)}><span aria-hidden="true">☷</span> {filtered.length} propiedades</button>}</section>
       </section>
 
       {selected && <div className="property-drawer" role="dialog" aria-label={`Ficha de ${selected.title}`}>
