@@ -26,7 +26,12 @@ function ListingAttributes({ listing, context }: { listing: Listing; context: "c
 export default function Home() {
   const [allListings, setAllListings] = useState<Listing[]>([]);
   const [inventoryState, setInventoryState] = useState<"loading" | "success" | "error">("loading");
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(""); // lo que se está escribiendo
+  const [appliedQuery, setAppliedQuery] = useState(""); // búsqueda ya ejecutada (chip), con el campo otra vez vacío
+  // Mientras se escribe, filtra en vivo; con el campo vacío, sigue aplicando la última búsqueda ejecutada.
+  const activeQuery = query.trim() ? query : appliedQuery;
+  const submitSearch = () => { const value = query.trim(); if (!value) return; setAppliedQuery(value); setQuery(""); };
+  const clearSearch = () => { setQuery(""); setAppliedQuery(""); };
   const [operation, setOperation] = useState("Todo");
   const [type, setType] = useState("Todo");
   const [sort, setSort] = useState("recommended");
@@ -98,20 +103,20 @@ export default function Home() {
     return () => window.removeEventListener("keydown", handleEscape);
   }, [selected, galleryOpen, closeDrawer]);
 
-  const filtered = useMemo(() => filterAndSortListings(allListings, query, operation, type, sort), [allListings, query, operation, type, sort]);
+  const filtered = useMemo(() => filterAndSortListings(allListings, activeQuery, operation, type, sort), [allListings, activeQuery, operation, type, sort]);
   // Aggregated demand signal (no free text leaves the browser): once the filters settle for 1.5 s.
   useEffect(() => {
     if (inventoryState !== "success") return;
-    const timer = window.setTimeout(() => trackSearch(operation, type, query, filtered.length), 1500);
+    const timer = window.setTimeout(() => trackSearch(operation, type, activeQuery, filtered.length), 1500);
     return () => window.clearTimeout(timer);
-  }, [inventoryState, operation, type, query, filtered.length]);
+  }, [inventoryState, operation, type, activeQuery, filtered.length]);
   useEffect(() => {
     if (selected && !filtered.some(item => item.id === selected.id)) setSelected(null);
   }, [filtered, selected]);
 
   return (
     <main className="geo-app">
-      <SiteHeader query={query} onQueryChange={setQuery} mobileFilters={mobileFilters} onMobileFiltersChange={setMobileFilters} />
+      <SiteHeader query={query} onQueryChange={setQuery} onQuerySubmit={submitSearch} mobileFilters={mobileFilters} onMobileFiltersChange={setMobileFilters} />
 
       <div className="quick-filters" aria-label="Filtros rápidos">
         {["Todo", "Comprar", "Alquilar", ...propertyTypes].map((filter) => (
@@ -123,12 +128,12 @@ export default function Home() {
         ))}
       </div>
 
-      {mobileFilters && <section className="mobile-filter-sheet" aria-label="Filtros de propiedades"><div className="mobile-filter-head"><strong>Filtrar propiedades</strong><button type="button" onClick={() => setMobileFilters(false)} aria-label="Cerrar filtros">×</button></div><div className="mobile-filter-options"><strong>Operación</strong>{["Todo", "Comprar", "Alquilar"].map((value) => <button key={value} type="button" className={operation === value ? "active" : ""} onClick={() => setOperation(value)}>{value}</button>)}<strong>Tipo</strong>{["Todo", ...propertyTypes].map((value) => <button key={value} type="button" className={type === value ? "active" : ""} onClick={() => setType(value)}>{value}</button>)}<button type="button" onClick={() => { setQuery(""); setOperation("Todo"); setType("Todo"); }}>Limpiar filtros</button></div></section>}
+      {mobileFilters && <section className="mobile-filter-sheet" aria-label="Filtros de propiedades"><div className="mobile-filter-head"><strong>Filtrar propiedades</strong><button type="button" onClick={() => setMobileFilters(false)} aria-label="Cerrar filtros">×</button></div><div className="mobile-filter-options"><strong>Operación</strong>{["Todo", "Comprar", "Alquilar"].map((value) => <button key={value} type="button" className={operation === value ? "active" : ""} onClick={() => setOperation(value)}>{value}</button>)}<strong>Tipo</strong>{["Todo", ...propertyTypes].map((value) => <button key={value} type="button" className={type === value ? "active" : ""} onClick={() => setType(value)}>{value}</button>)}<button type="button" onClick={() => { clearSearch(); setOperation("Todo"); setType("Todo"); }}>Limpiar filtros</button></div></section>}
 
       <section id="explorar" className="explorer">
         <aside className={`results-panel ${mobileList ? "mobile-open" : ""}`}>
           <div className="results-head"><div><strong>{filtered.length} propiedades encontradas</strong><span>Total de propiedades: {allListings.length}</span></div><button className="close-mobile" onClick={() => setMobileList(false)} aria-label="Cerrar listado">×</button></div>
-          <div className="results-tools"><select value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Ordenar propiedades"><option value="recommended">Orden predeterminado</option><option value="recent">Más recientes</option><option value="priceAsc">Menor precio por moneda</option><option value="priceDesc">Mayor precio por moneda</option></select><button className="advanced" onClick={() => { setOperation("Todo"); setType("Todo"); setQuery(""); setSort("recommended"); }}>Limpiar filtros</button></div>
+          <div className="results-tools"><select value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Ordenar propiedades"><option value="recommended">Orden predeterminado</option><option value="recent">Más recientes</option><option value="priceAsc">Menor precio por moneda</option><option value="priceDesc">Mayor precio por moneda</option></select><button className="advanced" onClick={() => { setOperation("Todo"); setType("Todo"); clearSearch(); setSort("recommended"); }}>Limpiar filtros</button></div>
           <div className="listing-list">
             {inventoryState !== "success" ? <div className="empty-state" role={inventoryState === "error" ? "alert" : "status"}>{inventoryState === "loading" ? "Cargando propiedades…" : "No pudimos cargar las propiedades en este momento."}</div> : allListings.length === 0 ? <div className="empty-state">No hay propiedades disponibles en este momento.</div> : filtered.length === 0 ? <div className="empty-state">No encontramos propiedades con esos filtros.</div> : filtered.map((item) => (
               <article className={`listing-card ${selected?.id === item.id ? "selected" : ""}`} key={item.id}>
@@ -138,7 +143,9 @@ export default function Home() {
             ))}
           </div>
         </aside>
-        <section className="map-panel"><PiuraMap properties={filtered.filter(isMappable)} resetViewKey={mapResetKey} layoutKey={`${mobileList}:${!!selected}`} onSelect={(item) => openDrawer(item)} />{!selected && <button className="mobile-list-toggle" aria-label={`Mostrar lista de ${filtered.length} propiedades`} onClick={() => setMobileList(true)}><span aria-hidden="true">☷</span> {filtered.length} propiedades</button>}</section>
+        <section className="map-panel">{appliedQuery && !query.trim() && <div className="search-chip" role="status">
+          <span>Resultados para <b>«{appliedQuery}»</b></span>
+          <button type="button" onClick={() => setAppliedQuery("")} aria-label={`Quitar la búsqueda «${appliedQuery}»`}>×</button></div>}<PiuraMap properties={filtered.filter(isMappable)} resetViewKey={mapResetKey} layoutKey={`${mobileList}:${!!selected}`} onSelect={(item) => openDrawer(item)} />{!selected && <button className="mobile-list-toggle" aria-label={`Mostrar lista de ${filtered.length} propiedades`} onClick={() => setMobileList(true)}><span aria-hidden="true">☷</span> {filtered.length} propiedades</button>}</section>
       </section>
 
       {selected && <div className="property-drawer" role="dialog" aria-label={`Ficha de ${selected.title}`}>
