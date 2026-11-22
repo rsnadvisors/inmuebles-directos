@@ -10,7 +10,7 @@ import { ACTION_CONFIRM, ACTION_LABELS, availableActions, LISTING_TTL_DAYS, type
 type Props = { id: string; title: string; slug: string; status: string; listingType: string; isReserved: boolean;
   ownerPaused: boolean; deletionRequestedAt: string | null; publishedAt: string | null; renewedAt?: string | null; closedViaPortal?: boolean | null; siteOrigin?: string; moderationNote?: string | null; reviewRequestedAt?: string | null };
 
-const DELETE_CONFIRM = (title: string) => `Vas a eliminar definitivamente «${title}» y sus fotos. Esta acción no se puede deshacer.\n\nSi solo se vendió o alquiló, usa «Marcar como vendido/alquilado» en su lugar.\n\n¿Eliminar el anuncio?`;
+const DELETE_CONFIRM = (title: string) => `Vas a eliminar definitivamente «${title}» y sus fotos. Esta acción no se puede deshacer.\n\nQuien abra su enlace será llevado a otros inmuebles de la misma zona.\n\nSi solo se vendió o alquiló, usa «Marcar como vendido/alquilado» en su lugar: el enlace mostrará el aviso de cierre y podrás volver a publicarlo.\n\n¿Eliminar el anuncio?`;
 
 /** Acciones de gestión de un anuncio propio. Cada cambio se confirma en el servidor y recarga la lista. */
 export default function ListingActions(props: Props) {

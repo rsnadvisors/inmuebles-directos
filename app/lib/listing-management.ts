@@ -116,7 +116,7 @@ export const ACTION_LABELS: Record<ListingAction, string> = {
   unreserve: "Quitar «Reservado»", pause: "Pausar anuncio", renew: "Renovar: sigue disponible", reactivate: "Volver a publicar",
 };
 export const ACTION_CONFIRM: Partial<Record<ListingAction, string>> = {
-  mark_sold: "El anuncio dejará de mostrarse en el mapa y pasará a «Cerradas». Podrás volver a publicarlo si la venta no se concreta. ¿Continuar?",
-  mark_rented: "El anuncio dejará de mostrarse en el mapa y pasará a «Cerradas». Podrás volver a publicarlo cuando quede libre. ¿Continuar?",
-  pause: "El anuncio dejará de mostrarse en el mapa hasta que lo vuelvas a publicar. ¿Continuar?",
+  mark_sold: "El anuncio dejará de mostrarse en el mapa y pasará a «Cerradas». Su enlace seguirá abierto durante 6 meses con el aviso «Vendido», sin fotos, precio ni tu teléfono, y sugerirá otros inmuebles de la zona. Podrás volver a publicarlo si la venta no se concreta. ¿Continuar?",
+  mark_rented: "El anuncio dejará de mostrarse en el mapa y pasará a «Cerradas». Su enlace seguirá abierto durante 6 meses con el aviso «Alquilado», sin fotos, precio ni tu teléfono, y sugerirá otros inmuebles de la zona. Podrás volver a publicarlo cuando quede libre. ¿Continuar?",
+  pause: "El anuncio dejará de mostrarse en el mapa hasta que lo vuelvas a publicar. Quien abra su enlace verá «No disponible por ahora», sin ningún dato del anuncio. ¿Continuar?",
 };

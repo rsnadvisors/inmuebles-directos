@@ -1,9 +1,8 @@
 import type { Metadata } from "next";
-import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, permanentRedirect } from "next/navigation";
 import { siteOrigin } from "../../lib/auth-origin";
 import Breadcrumb from "../../components/Breadcrumb";
-import { compactLocation, formatPrice, isMappable, listingCity, primaryImage, propertyIcon, type Listing } from "../../lib/inventory";
+import { formatPrice, isMappable, listingCity, type Listing } from "../../lib/inventory";
 import { jsonLdText, listingBreadcrumb, listingJsonLd, listingKind, listingSeoDescription, listingSeoTitle, listingZone } from "../../lib/listing-seo";
 import { getPublishedListing, getPublisherName, readHomeListings } from "../../lib/property";
 import { landingPath, operationSlug, slugify } from "../../lib/landing";
@@ -14,7 +13,9 @@ import PropertyContactActions from "../../components/PropertyContactActions";
 import ListingViewBeacon from "../../components/ListingViewBeacon";
 import ShareListing from "../../components/ShareListing";
 import { TITULAR } from "../../lib/legal";
-import { sizedImageUrl } from "../../lib/property-image-source";
+import ListingSuggestions from "../../components/ListingSuggestions";
+import { getListingPublicState, removedListingTarget } from "../../lib/listing-state";
+import ClosedListing, { closedListingTitle } from "./ClosedListing";
 
 type PageProps = { params: Promise<{ slug: string }> };
 
@@ -49,25 +50,22 @@ function relatedListings(property: Listing, all: Listing[] | undefined): Listing
 function RelatedListings({ property, items }: { property: Listing; items: Listing[] }) {
   const op = operationSlug(property.operation);
   const city = listingCity(property);
-  if (!op || !city || items.length === 0) return null;
-  const heading = `Más inmuebles ${op === "venta" ? "en venta" : "en alquiler"} en ${city}`;
-  return <section className="property-full-section property-related" aria-labelledby="property-related">
-    <h2 id="property-related">{heading}</h2>
-    <ul>{items.map(item => {
-      const image = primaryImage(item);
-      return <li key={item.id}><Link href={`/inmueble/${item.slug}`}>
-        <span className={`property-related-photo${image ? "" : " empty"}`}>{image ? <img src={sizedImageUrl(image.url, 320)} alt="" width={96} height={72} loading="lazy" decoding="async" /> : <span aria-hidden="true">{propertyIcon(item.type)}</span>}</span>
-        <span className="property-related-text"><b>{formatPrice(item.price, item.currency)}</b><span>{item.title}</span><small>{compactLocation(item)}</small></span>
-      </Link></li>;
-    })}</ul>
-    <Link className="property-related-all" href={landingPath(op, city)}>Ver todos los inmuebles {op === "venta" ? "en venta" : "en alquiler"} en {city} ›</Link>
-  </section>;
+  if (!op || !city) return null;
+  const label = op === "venta" ? "en venta" : "en alquiler";
+  return <ListingSuggestions heading={`Más inmuebles ${label} en ${city}`} items={items}
+    allHref={landingPath(op, city)} allLabel={`Ver todos los inmuebles ${label} en ${city}`} />;
 }
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const { slug } = await params;
   const property = await getPublishedListing(slug);
-  if (!property) notFound();
+  if (!property) {
+    // Vendido, alquilado o no disponible: página propia fuera del índice (sus enlaces sí se siguen). Retirado: la
+    // página hace la redirección permanente; sin estado público, 404.
+    const state = await getListingPublicState(slug);
+    if (!state) notFound();
+    return { title: `${closedListingTitle(state)} | Inmuebles Directos`, robots: { index: false, follow: true } };
+  }
   const canonical = `/inmueble/${encodeURIComponent(property.slug || slug)}`;
   const description = listingSeoDescription(property);
   return {
@@ -89,7 +87,14 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 export default async function PropertyPage({ params }: PageProps) {
   const { slug } = await params;
   const property = await getPublishedListing(slug);
-  if (!property) notFound();
+  if (!property) {
+    const state = await getListingPublicState(slug);
+    if (!state) notFound();
+    const inventory = await readHomeListings();
+    // Eliminado (o cerrado hace más de 6 meses): redirección permanente a su zona, que conserva la autoridad del enlace.
+    if (state.state === "removed") permanentRedirect(removedListingTarget(state, inventory));
+    return <ClosedListing state={state} inventory={inventory} />;
+  }
   const date = publishedDate(property.publishedAt);
   // Nombre del anunciante y anuncios de la zona en paralelo: la ficha no espera dos consultas seguidas.
   const [publisher, inventory] = await Promise.all([getPublisherName(property.id), readHomeListings()]);

@@ -6,7 +6,9 @@ type Response = { data: unknown; error: unknown };
 let responder: (() => Promise<Response>) | null = null;
 let refresh: (() => Promise<void>) | null = null;
 let publisherName: unknown = null;
-export function resetInventory() { rows = structuredClone(properties); responder = null; refresh = null; publisherName = null; }
+let publicState: unknown = null;
+export function resetInventory() { rows = structuredClone(properties); responder = null; refresh = null; publisherName = null; publicState = null; }
+export function setPublicState(value: unknown) { publicState = value; }
 export function setPublisherName(value: unknown) { publisherName = value; }
 export function setInventory(value: unknown[]) { rows = structuredClone(value); }
 export function setResponse(value: () => Promise<Response>) { responder = value; }
@@ -38,6 +40,7 @@ export const supabase = {
     };
   }),
   rpc: vi.fn(async (name: string) => {
+    if (name === "listing_public_state") return { data: publicState, error: null };
     if (name !== "listing_publisher_name") throw new Error(`Unexpected rpc: ${name}`);
     if (publisherName instanceof Error) return { data: null, error: { message: publisherName.message } };
     return { data: publisherName, error: null };
