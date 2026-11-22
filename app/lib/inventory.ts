@@ -204,6 +204,11 @@ export function matchesSearch(item: Listing, query: string): boolean {
   return wanted.every(term => haystack.some(word => word.startsWith(term)));
 }
 
+/** Ciudad del anuncio para la ruta de navegación y el filtro ?ciudad= (si no hay ciudad, el departamento). */
+export const listingCity = (item: Listing) => item.locationParts.city || item.locationParts.region;
+/** Coincidencia exacta de ciudad, sin importar mayúsculas ni tildes; vacío = todas. */
+export const matchesCity = (item: Listing, city: string) => !city.trim() || searchText(listingCity(item)) === searchText(city);
+
 export function filterAndSortListings(listings: Listing[], query: string, operation: string, type: string, sort: string): Listing[] {
   const result = listings.filter(item => {
     return matchesSearch(item, query)

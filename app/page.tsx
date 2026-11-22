@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { getBrowserClient } from "./lib/auth-client";
-import { Listing, compactLocation, comparisonAttributes, filterAndSortListings, formatPrice, isMappable, normalizeInventory, previewLocation, primaryImage, propertyIcon, propertyTypes } from "./lib/inventory";
+import { Listing, compactLocation, comparisonAttributes, filterAndSortListings, formatPrice, isMappable, matchesCity, normalizeInventory, previewLocation, primaryImage, propertyIcon, propertyTypes } from "./lib/inventory";
 import SiteHeader from "./components/SiteHeader";
 import PropertyContactActions from "./components/PropertyContactActions";
 import ListingViewBeacon from "./components/ListingViewBeacon";
@@ -31,7 +31,8 @@ export default function Home() {
   // Mientras se escribe, filtra en vivo; con el campo vacío, sigue aplicando la última búsqueda ejecutada.
   const activeQuery = query.trim() ? query : appliedQuery;
   const submitSearch = () => { const value = query.trim(); if (!value) return; setAppliedQuery(value); setQuery(""); };
-  const clearSearch = () => { setQuery(""); setAppliedQuery(""); };
+  const [city, setCity] = useState(""); // filtro exacto por ciudad, llega desde la ruta de navegación de la ficha
+  const clearSearch = () => { setQuery(""); setAppliedQuery(""); setCity(""); };
   const [operation, setOperation] = useState("Todo");
   const [type, setType] = useState("Todo");
   const [sort, setSort] = useState("recommended");
@@ -89,6 +90,16 @@ export default function Home() {
     return () => { active = false; supabase.removeChannel(channel); };
   }, []);
 
+  // Enlaces de la ruta de navegación de la ficha: /?operacion=Comprar&ciudad=Piura. Se leen una vez y la URL queda limpia.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const wantedOperation = params.get("operacion");
+    const wantedCity = params.get("ciudad")?.trim().slice(0, 120) ?? "";
+    if (wantedOperation === "Comprar" || wantedOperation === "Alquilar") setOperation(wantedOperation);
+    if (wantedCity) setCity(wantedCity);
+    if (params.has("operacion") || params.has("ciudad")) window.history.replaceState(window.history.state, "", window.location.pathname);
+  }, []);
+
   useEffect(() => { setGalleryIndex(0); setGalleryOpen(false); }, [selected?.id]);
 
   useEffect(() => {
@@ -103,7 +114,7 @@ export default function Home() {
     return () => window.removeEventListener("keydown", handleEscape);
   }, [selected, galleryOpen, closeDrawer]);
 
-  const filtered = useMemo(() => filterAndSortListings(allListings, activeQuery, operation, type, sort), [allListings, activeQuery, operation, type, sort]);
+  const filtered = useMemo(() => filterAndSortListings(city ? allListings.filter(item => matchesCity(item, city)) : allListings, activeQuery, operation, type, sort), [allListings, city, activeQuery, operation, type, sort]);
   // Aggregated demand signal (no free text leaves the browser): once the filters settle for 1.5 s.
   useEffect(() => {
     if (inventoryState !== "success") return;
@@ -143,9 +154,12 @@ export default function Home() {
             ))}
           </div>
         </aside>
-        <section className="map-panel">{appliedQuery && !query.trim() && <div className="search-chip" role="status">
-          <span>Resultados para <b>«{appliedQuery}»</b></span>
-          <button type="button" onClick={() => setAppliedQuery("")} aria-label={`Quitar la búsqueda «${appliedQuery}»`}>×</button></div>}<PiuraMap properties={filtered.filter(isMappable)} resetViewKey={mapResetKey} layoutKey={`${mobileList}:${!!selected}`} onSelect={(item) => openDrawer(item)} />{!selected && <button className="mobile-list-toggle" aria-label={`Mostrar lista de ${filtered.length} propiedades`} onClick={() => setMobileList(true)}><span aria-hidden="true">☷</span> {filtered.length} propiedades</button>}</section>
+        <section className="map-panel">{appliedQuery && !query.trim() ? <div className="search-chip" role="status">
+          <span>Resultados para <b>«{appliedQuery}»</b>{city && <> en <b>{city}</b></>}</span>
+          <button type="button" onClick={() => setAppliedQuery("")} aria-label={`Quitar la búsqueda «${appliedQuery}»`}>×</button></div>
+          : city && <div className="search-chip" role="status">
+          <span>Propiedades en <b>{city}</b></span>
+          <button type="button" onClick={() => setCity("")} aria-label={`Quitar el filtro de ciudad ${city}`}>×</button></div>}<PiuraMap properties={filtered.filter(isMappable)} resetViewKey={mapResetKey} layoutKey={`${mobileList}:${!!selected}`} onSelect={(item) => openDrawer(item)} />{!selected && <button className="mobile-list-toggle" aria-label={`Mostrar lista de ${filtered.length} propiedades`} onClick={() => setMobileList(true)}><span aria-hidden="true">☷</span> {filtered.length} propiedades</button>}</section>
       </section>
 
       {selected && <div className="property-drawer" role="dialog" aria-label={`Ficha de ${selected.title}`}>
