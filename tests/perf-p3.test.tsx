@@ -35,6 +35,16 @@ describe("rendimiento P3", () => {
     expect(screen.getAllByRole("article").length).toBeGreaterThan(0);
   });
 
+  it("P3c: el script para regenerar las imágenes lee el centro y el zoom del mapa real", () => {
+    const script = readFileSync("scripts/build-static-map.py", "utf8");
+    const map = readFileSync("app/PiuraMap.tsx", "utf8");
+    // Los mismos patrones que busca el script deben existir en PiuraMap.tsx (si alguien los cambia, esta prueba avisa).
+    expect(script).toContain('MAP_SOURCE = ROOT / "app" / "PiuraMap.tsx"');
+    expect(map).toMatch(/const piura: \[number, number\] = \[(-?\d+(?:\.\d+)?), (-?\d+(?:\.\d+)?)\];/);
+    expect(map).toMatch(/<MapContainer[^>]*\bzoom=\{(\d+)\}/);
+    expect(script).toContain('"mapa-piura.webp": (1600, 1000), "mapa-piura-movil.webp": (480, 900)');
+  });
+
   it("P3c: la imagen fija se alinea con el mapa (sin escalar, centrada) y el mapa queda encima", () => {
     const css = readFileSync("app/globals.css", "utf8");
     expect(css).toMatch(/\.map-placeholder\{position:absolute;inset:0;width:100%;height:100%;max-width:none;object-fit:none;object-position:50% 50%/);
