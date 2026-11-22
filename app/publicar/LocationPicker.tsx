@@ -10,7 +10,7 @@ type Props = { value: PickedPoint | null; onPick: (lat: number, lng: number) => 
 
 const PIURA: [number, number] = [-5.1945, -80.6328];
 const SATELLITE = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
-const STREETS = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
+const STREETS = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
 
 // Pin dibujado en SVG (sin imágenes de Leaflet, que no se empaquetan bien); la punta queda en el punto exacto.
 const pinIcon = (placed: boolean) => L.divIcon({

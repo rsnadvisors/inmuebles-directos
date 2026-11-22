@@ -6,6 +6,14 @@ vi.mock("../app/lib/supabase", async () => import("./mocks/supabase"));
 vi.mock("@supabase/supabase-js", () => ({
   createClient: () => { throw new Error("Real Supabase SDK is forbidden in PR-0 tests"); },
 }));
+// Supabase en el navegador se carga con import() diferido (rendimiento P1a). Vitest no aplica a ese import() la
+// simulación que cada prueba declara para auth-client, así que aquí se resuelve con una importación normal,
+// que sí la recibe. El comportamiento en producción (fragmento aparte, cargado después del pintado) no cambia.
+vi.mock("../app/lib/lazy-browser-client", async () => {
+  const actual = await vi.importActual<typeof import("../app/lib/lazy-browser-client")>("../app/lib/lazy-browser-client");
+  const { getBrowserClient } = await import("../app/lib/auth-client");
+  return { ...actual, loadBrowserClient: async () => getBrowserClient() };
+});
 vi.mock("next/dynamic", async () => {
   const { default: Map } = await import("./mocks/Map");
   return { default: () => Map };

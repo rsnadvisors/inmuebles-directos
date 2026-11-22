@@ -4,14 +4,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { getBrowserClient } from "./lib/auth-client";
+import { loadBrowserClient, whenIdle, type BrowserClient } from "./lib/lazy-browser-client";
 import { Listing, compactLocation, comparisonAttributes, filterAndSortListings, formatPrice, isMappable, matchesCity, normalizeInventory, previewLocation, primaryImage, propertyIcon, propertyTypes } from "./lib/inventory";
 import SiteHeader from "./components/SiteHeader";
 import PropertyContactActions from "./components/PropertyContactActions";
 import ListingViewBeacon from "./components/ListingViewBeacon";
 import { trackSearch } from "./lib/listing-events";
+import { sizedImageUrl } from "./lib/property-image-source";
 
-const PiuraMap = dynamic(() => import("./PiuraMap"), { ssr: false });
+// El mapa es lo más grande de la pantalla en el móvil (el LCP). Su código se pide en cuanto este módulo se evalúa
+// en el navegador, en paralelo con el arranque de React, en lugar de esperar a que la página termine de hidratarse.
+const loadMap = () => import("./PiuraMap");
+if (typeof window !== "undefined") void loadMap().catch(() => {});
+const PiuraMap = dynamic(loadMap, { ssr: false });
 
 function ListingAttributes({ listing, context }: { listing: Listing; context: "card" | "drawer" }) {
   const attributes = comparisonAttributes(listing);
@@ -65,10 +70,18 @@ export default function Home({ initialListings }: { initialListings?: Listing[] 
   }, []);
 
   useEffect(() => {
-    const supabase = getBrowserClient();
-    if (!supabase) { setInventoryState("error"); return; }
     let active = true;
     let requestSequence = 0;
+    let removeChannel = () => {};
+    // Con datos del servidor no hay prisa: Supabase (refresco + avisos en tiempo real) se carga cuando el navegador
+    // queda libre, para no competir con el mapa. Sin datos del servidor, se carga enseguida como antes.
+    const begin = () => void loadBrowserClient().then(supabase => {
+      if (!active) return;
+      if (!supabase) { if (initialListings === undefined) setInventoryState("error"); return; }
+      start(supabase);
+    }, () => { if (active && initialListings === undefined) setInventoryState("error"); });
+    const cancelIdle = initialListings !== undefined ? whenIdle(begin) : (begin(), () => {});
+    function start(supabase: BrowserClient) {
     // Con datos del servidor, la primera lectura solo refresca en silencio (sin vaciar el listado ni mostrar «Cargando…»).
     let quiet = initialListings !== undefined;
     const load = async () => {
@@ -93,7 +106,9 @@ export default function Home({ initialListings }: { initialListings?: Listing[] 
     };
     load();
     const channel = supabase.channel("properties-map").on("postgres_changes", { event: "*", schema: "public", table: "properties" }, load).subscribe();
-    return () => { active = false; supabase.removeChannel(channel); };
+    removeChannel = () => { void supabase.removeChannel(channel); };
+    }
+    return () => { active = false; cancelIdle(); removeChannel(); };
   // eslint-disable-next-line react-hooks/exhaustive-deps -- solo al montar; initialListings es el punto de partida
   }, []);
 
@@ -155,7 +170,7 @@ export default function Home({ initialListings }: { initialListings?: Listing[] 
           <div className="listing-list">
             {inventoryState !== "success" ? <div className="empty-state" role={inventoryState === "error" ? "alert" : "status"}>{inventoryState === "loading" ? "Cargando propiedades…" : "No pudimos cargar las propiedades en este momento."}</div> : allListings.length === 0 ? <div className="empty-state">No hay propiedades disponibles en este momento.</div> : filtered.length === 0 ? <div className="empty-state">No encontramos propiedades con esos filtros.</div> : filtered.map((item) => (
               <article className={`listing-card ${selected?.id === item.id ? "selected" : ""}`} key={item.id}>
-                <div className={`listing-photo ${primaryImage(item) ? "" : "listing-photo-empty"}`}>{primaryImage(item) ? <img src={primaryImage(item)!.url} alt="" loading="lazy" decoding="async" width={104} height={126} /> : <><span aria-hidden="true">{propertyIcon(item.type)}</span><small>Sin fotografía</small></>}<b>{item.operation}</b>{item.reserved && <b className="listing-reserved">Reservado</b>}</div>
+                <div className={`listing-photo ${primaryImage(item) ? "" : "listing-photo-empty"}`}>{primaryImage(item) ? <img src={sizedImageUrl(primaryImage(item)!.url, 320)} alt="" loading="lazy" decoding="async" width={104} height={126} /> : <><span aria-hidden="true">{propertyIcon(item.type)}</span><small>Sin fotografía</small></>}<b>{item.operation}</b>{item.reserved && <b className="listing-reserved">Reservado</b>}</div>
                 <div className="listing-content"><div className="listing-price">{formatPrice(item.price, item.currency)}</div><h2><a className="listing-title-link" href={item.slug ? `/inmueble/${item.slug}` : undefined} onClick={(event) => {
                   // Clic normal: abre el panel como siempre. Ctrl/Cmd/clic central: la ficha en otra pestaña. Google sigue el enlace.
                   if (!item.slug || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
@@ -177,7 +192,7 @@ export default function Home({ initialListings }: { initialListings?: Listing[] 
         <button ref={drawerCloseRef} className="drawer-close" type="button" onClick={() => closeDrawer()} aria-label="Cerrar detalle de propiedad" title="Cerrar">×</button>
         {/* Solo se desplaza el contenido: el botón × queda fijo sobre la esquina de la foto en escritorio y en móvil. */}
         <div className="drawer-scroll">
-        {selected.images.length > 0 ? <div className="drawer-gallery"><button className="drawer-main-image" type="button" onClick={() => setGalleryOpen(true)} aria-label="Ampliar galería"><img src={selected.images[galleryIndex]} alt={selected.title} /><span>{galleryIndex + 1} / {selected.images.length}</span></button><div>{selected.images.slice(0, 5).map((image, index) => <button key={image} type="button" aria-label={`Ver imagen ${index + 1}`} className={galleryIndex === index ? "active" : ""} onClick={() => setGalleryIndex(index)}><img src={image} alt="" /></button>)}</div></div> : <div className="drawer-media-empty"><span aria-hidden="true">{propertyIcon(selected.type)}</span><strong>Sin fotografías disponibles</strong></div>}
+        {selected.images.length > 0 ? <div className="drawer-gallery"><button className="drawer-main-image" type="button" onClick={() => setGalleryOpen(true)} aria-label="Ampliar galería"><img src={sizedImageUrl(selected.images[galleryIndex], 640)} alt={selected.title} /><span>{galleryIndex + 1} / {selected.images.length}</span></button><div>{selected.images.slice(0, 5).map((image, index) => <button key={image} type="button" aria-label={`Ver imagen ${index + 1}`} className={galleryIndex === index ? "active" : ""} onClick={() => setGalleryIndex(index)}><img src={sizedImageUrl(image, 320)} alt="" loading="lazy" /></button>)}</div></div> : <div className="drawer-media-empty"><span aria-hidden="true">{propertyIcon(selected.type)}</span><strong>Sin fotografías disponibles</strong></div>}
         <div className="drawer-kicker">{selected.operation} · {selected.type}{selected.reserved && <span className="reserved-badge">Reservado</span>}</div><h2>{selected.title}</h2><div className="drawer-price">{formatPrice(selected.price, selected.currency)}</div>
         {selected.description && <p className="drawer-description">{selected.description}</p>}
         <div className="drawer-location"><span aria-hidden="true">⌖</span> {previewLocation(selected)}</div><ListingAttributes listing={selected} context="drawer" />

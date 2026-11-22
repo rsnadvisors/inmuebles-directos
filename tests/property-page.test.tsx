@@ -38,7 +38,9 @@ describe("canonical property page", () => {
     const metadata = await generateMetadata({ params: Promise.resolve({ slug: "fixture-house" }) });
     expect(metadata.openGraph?.images).toEqual([{ url: `https://inmueblesdirectosperu.com/api/property-images/${imageId}`, alt: "Fachada" }]);
     render(await PropertyPage({ params: Promise.resolve({ slug: "fixture-house" }) }));
-    expect(screen.getByAltText("Fachada").getAttribute("src")).toBe(`/api/property-images/${imageId}`);
+    const cover = screen.getByAltText("Fachada");
+    expect(cover.getAttribute("src")).toBe(`/api/property-images/${imageId}?w=1200`);
+    expect(cover.getAttribute("srcset")).toBe(`/api/property-images/${imageId}?w=640 640w, /api/property-images/${imageId}?w=1200 1200w`);
   });
 
   it("returns notFound for unknown, empty and non-published slugs", async () => {

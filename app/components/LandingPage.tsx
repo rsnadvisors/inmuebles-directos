@@ -9,6 +9,7 @@ import { compactLocation, comparisonAttributes, formatPrice, primaryImage, prope
 import { buildLanding, landingBreadcrumb, landingMetaDescription, landingMetaTitle, type Landing } from "../lib/landing";
 import { jsonLdText } from "../lib/listing-seo";
 import { readHomeListings } from "../lib/property";
+import { sizedImageUrl } from "../lib/property-image-source";
 
 export type LandingParams = { ciudad?: string; tipo?: string };
 
@@ -82,7 +83,7 @@ export async function LandingView({ operation, params = {} }: { operation: strin
           const attributes = comparisonAttributes(item);
           return <li key={item.id}><article className="landing-card">
             <div className={`landing-card-photo${image ? "" : " empty"}`}>
-              {image ? <img src={image.url} alt={image.altText || `${item.title}, ${compactLocation(item)}`} loading="lazy" width={400} height={260} /> : <span aria-hidden="true">{propertyIcon(item.type)}</span>}
+              {image ? <img src={sizedImageUrl(image.url, 640)} alt={image.altText || `${item.title}, ${compactLocation(item)}`} loading="lazy" width={400} height={260} /> : <span aria-hidden="true">{propertyIcon(item.type)}</span>}
               <b>{item.operation}</b>{item.reserved && <b className="landing-card-reserved">Reservado</b>}
             </div>
             <div className="landing-card-body">

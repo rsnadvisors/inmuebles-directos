@@ -33,6 +33,8 @@ describe("P0 header auth ordering (isolated, offline)", () => {
     const old = deferred<ReturnType<typeof signedIn>>();
     stub.getUser.mockReturnValueOnce(old.promise).mockResolvedValue(signedOut);
     render(<SiteHeader />);
+    // Supabase llega en un fragmento diferido: la suscripción existe en cuanto arranca la primera consulta.
+    await waitFor(() => expect(stub.getUser).toHaveBeenCalledTimes(1));
     act(authChanged);
     await waitFor(() => expect(stub.getUser).toHaveBeenCalledTimes(2));
     await act(async () => { old.resolve(signedIn()); });

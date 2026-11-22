@@ -30,6 +30,31 @@ export async function loadPublishedPrivateImage(client: SupabaseClient, imageId:
   return downloaded.data;
 }
 
+/** Mínimo de la API de imágenes de Cloudflare que usamos (binding IMAGES del Worker). */
+export type ImagesBinding = {
+  input(stream: ReadableStream): {
+    transform(options: { width: number; fit: "scale-down" }): {
+      output(options: { format: "image/webp"; quality: number }): Promise<{ response(options?: { headers?: HeadersInit }): Response }>;
+    };
+  };
+};
+
+/**
+ * Foto ya autorizada, redimensionada a `width` y convertida a WebP. Mantiene no-store (la frontera de seguridad:
+ * un anuncio archivado deja de servir fotos al instante). Si el binding no existe (desarrollo local, pruebas) o
+ * falla (p. ej. límite mensual de transformaciones), devuelve null y la ruta sirve el original.
+ */
+export async function resizedImageResponse(blob: Blob, width: number, images: ImagesBinding | undefined): Promise<Response | null> {
+  if (!images) return null;
+  try {
+    const result = await images.input(blob.stream()).transform({ width, fit: "scale-down" }).output({ format: "image/webp", quality: 78 });
+    const response = result.response({ headers: { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } });
+    return response.ok ? response : null;
+  } catch {
+    return null;
+  }
+}
+
 export function imageResponse(blob: Blob, cacheControl: string): Response {
   return new Response(blob, { headers: {
     "Content-Type": blob.type,
