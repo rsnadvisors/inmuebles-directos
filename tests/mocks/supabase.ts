@@ -5,7 +5,9 @@ let rows: unknown[] = structuredClone(properties);
 type Response = { data: unknown; error: unknown };
 let responder: (() => Promise<Response>) | null = null;
 let refresh: (() => Promise<void>) | null = null;
-export function resetInventory() { rows = structuredClone(properties); responder = null; refresh = null; }
+let publisherName: unknown = null;
+export function resetInventory() { rows = structuredClone(properties); responder = null; refresh = null; publisherName = null; }
+export function setPublisherName(value: unknown) { publisherName = value; }
 export function setInventory(value: unknown[]) { rows = structuredClone(value); }
 export function setResponse(value: () => Promise<Response>) { responder = value; }
 export function refreshInventory() { return refresh?.(); }
@@ -34,6 +36,11 @@ export const supabase = {
       select: vi.fn(() => query),
       insert: forbidden, update: forbidden, delete: forbidden,
     };
+  }),
+  rpc: vi.fn(async (name: string) => {
+    if (name !== "listing_publisher_name") throw new Error(`Unexpected rpc: ${name}`);
+    if (publisherName instanceof Error) return { data: null, error: { message: publisherName.message } };
+    return { data: publisherName, error: null };
   }),
   channel: vi.fn(() => channel),
   removeChannel: vi.fn(async () => "ok"),

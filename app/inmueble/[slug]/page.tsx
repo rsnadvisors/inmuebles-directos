@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { siteOrigin } from "../../lib/auth-origin";
 import Link from "next/link";
 import { formatPrice, isMappable, listingCity, type Listing } from "../../lib/inventory";
-import { getPublishedListing } from "../../lib/property";
+import { getPublishedListing, getPublisherName } from "../../lib/property";
 import PropertyGallery from "./PropertyGallery";
 import PropertyMap from "./PropertyMap";
 import SiteHeader from "../../components/SiteHeader";
@@ -40,6 +40,18 @@ function Breadcrumb({ property }: { property: Listing }) {
   </nav>;
 }
 
+/** Quién publica: avatar con inicial, nombre abreviado, fecha y sello del portal. */
+function Publisher({ name, date }: { name: string | null; date: string | null }) {
+  const shown = name ?? "Anunciante";
+  return <div className="publisher">
+    <div className="publisher-head">
+      <span className="publisher-avatar" aria-hidden="true">{shown.charAt(0).toLocaleUpperCase("es-PE")}</span>
+      <div className="publisher-text"><strong className="publisher-name">{shown}</strong>{date && <span className="publisher-date">Publicado el {date}</span>}</div>
+    </div>
+    <p className="publisher-trust"><svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="11" fill="currentColor" /><path d="m7 12.5 3.2 3.2L17 9" fill="none" stroke="#fff" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" /></svg>Publicada en Inmuebles Directos</p>
+  </div>;
+}
+
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const { slug } = await params;
   const property = await getPublishedListing(slug);
@@ -65,6 +77,7 @@ export default async function PropertyPage({ params }: PageProps) {
   const property = await getPublishedListing(slug);
   if (!property) notFound();
   const date = publishedDate(property.publishedAt);
+  const publisher = await getPublisherName(property.id);
   const attributes = [
     ["Área total", property.area, "m²"],
     ["Área construida", property.builtArea, "m²"],
@@ -94,7 +107,7 @@ export default async function PropertyPage({ params }: PageProps) {
         {shownAttributes.length > 0 && <section className="property-full-section" aria-labelledby="property-attributes"><h2 id="property-attributes">Características</h2><dl className="property-full-attributes">{shownAttributes.map(([label, value, unit]) => <div key={label}><dt>{label}</dt><dd>{value}{unit ? ` ${unit}` : ""}</dd></div>)}</dl></section>}
         {property.description && <section className="property-full-section"><h2>Descripción</h2><p className="property-full-description">{property.description}</p></section>}
         {isMappable(property) && <section className="property-full-section"><h2>Ubicación</h2><PropertyMap property={property} /></section>}
-        {date && <section className="property-full-section property-full-publication"><h2>Publicación</h2><p>Publicado el {date}</p></section>}
+        <section className="property-full-section property-full-publication" aria-labelledby="property-publication"><h2 id="property-publication">Publicación</h2><Publisher name={publisher} date={date} /></section>
         <PropertyContactActions phone={property.contactPhone} title={property.title} status={property.status} listingId={property.id} /><ListingViewBeacon id={property.id} />
         <ShareListing url={listingUrl} title={property.title} />
         <p className="property-report"><a href={reportHref} rel="nofollow">Denunciar este anuncio</a></p>
