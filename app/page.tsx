@@ -20,5 +20,10 @@ export const metadata: Metadata = {
 export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
-  return <HomeClient initialListings={await readHomeListings()} />;
+  // Las imágenes del mapa salen de un solo dominio (OpenStreetMap recomienda no usar a/b/c). Un <link> real
+  // (React lo sube al <head>) abre la conexión desde el HTML, antes de que Leaflet las pida.
+  return <>
+    <link rel="preconnect" href="https://tile.openstreetmap.org" />
+    <HomeClient initialListings={await readHomeListings()} />
+  </>;
 }

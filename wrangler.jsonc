@@ -8,6 +8,8 @@
     "directory": ".open-next/assets",
     "binding": "ASSETS"
   },
+  // Redimensiona las fotos de anuncios a WebP (rendimiento P1c); facturado por transformación única al mes.
+  "images": { "binding": "IMAGES" },
   "services": [
     { "binding": "WORKER_SELF_REFERENCE", "service": "inmuebles-directos" }
   ],

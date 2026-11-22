@@ -77,7 +77,7 @@ export default function PiuraMap({ properties = [], onSelect, resetViewKey, layo
   const shown = properties;
   return <div className="leaflet-map" aria-label="Mapa interactivo de propiedades en Perú">
     <MapContainer center={center} zoom={13} scrollWheelZoom className="leaflet-map-canvas">
-      <TileLayer attribution={satellite ? '&copy; Esri' : '&copy; OpenStreetMap contributors'} url={satellite ? "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}" : "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"} />
+      <TileLayer attribution={satellite ? '&copy; Esri' : '&copy; OpenStreetMap contributors'} url={satellite ? "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}" : "https://tile.openstreetmap.org/{z}/{x}/{y}.png"} />
       {shown.map((property) => <Marker key={property.id} position={property.coords} icon={iconFor(property)} eventHandlers={{ click: () => onSelect?.(property) }}><Popup><strong>{property.title}</strong><br />{property.operation} · {property.type} · {formatPrice(property.price, property.currency)}</Popup></Marker>)}
       <LocateButton />
       <ResetViewOnClose resetViewKey={resetViewKey} />

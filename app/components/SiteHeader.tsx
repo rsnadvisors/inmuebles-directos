@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { getBrowserClient } from "../lib/auth-client";
+import { loadBrowserClient, type BrowserClient } from "../lib/lazy-browser-client";
 import SignOutButton from "./SignOutButton";
 
 type Props = {
@@ -21,11 +21,17 @@ export default function SiteHeader({ query, onQueryChange, onQuerySubmit, mobile
   const menuRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
-    const client = getBrowserClient();
-    if (!client) { setAccount({ signedIn: false, name: "" }); return; }
     let active = true;
     let requestSequence = 0;
     let authTimer: number | undefined;
+    let unsubscribe = () => {};
+    // Supabase llega en un fragmento aparte, después del primer pintado (no frena el mapa ni la portada).
+    void loadBrowserClient().then(client => {
+      if (!active) return;
+      if (!client) { setAccount({ signedIn: false, name: "" }); return; }
+      start(client);
+    }, () => { if (active) setAccount({ signedIn: false, name: "" }); });
+    function start(client: BrowserClient) {
     async function load(request: number) {
       try {
         const { data, error } = await client!.auth.getUser();
@@ -48,7 +54,9 @@ export default function SiteHeader({ query, onQueryChange, onQuerySubmit, mobile
       window.clearTimeout(authTimer);
       authTimer = window.setTimeout(() => { if (active && request === requestSequence) void load(request); }, 0);
     });
-    return () => { active = false; window.clearTimeout(authTimer); subscription.subscription.unsubscribe(); };
+    unsubscribe = () => subscription.subscription.unsubscribe();
+    }
+    return () => { active = false; window.clearTimeout(authTimer); unsubscribe(); };
   }, []);
   useEffect(() => {
     if (!menuOpen) return;

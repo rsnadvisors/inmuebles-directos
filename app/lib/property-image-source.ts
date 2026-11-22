@@ -3,6 +3,24 @@ const IMAGE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
 
 export function validImageId(value: string): boolean { return IMAGE_ID.test(value); }
 
+/**
+ * Anchos que el Worker sabe entregar redimensionados en WebP (rendimiento P1c). Una lista cerrada: nadie puede
+ * pedir tamaños arbitrarios (cada combinación nueva cuenta como transformación en Cloudflare Images).
+ */
+export const IMAGE_WIDTHS = [320, 640, 1200] as const;
+export type ImageWidth = typeof IMAGE_WIDTHS[number];
+
+/** «/api/property-images/<id>» → «/api/property-images/<id>?w=640». Las URLs públicas antiguas quedan igual. */
+export function sizedImageUrl(url: string, width: ImageWidth): string {
+  return /^\/api\/property-images\/[0-9a-f-]{36}$/i.test(url) ? `${url}?w=${width}` : url;
+}
+
+/** srcset para fotos que ocupan todo el ancho en el móvil y una columna en escritorio. */
+export function imageSrcSet(url: string): string | undefined {
+  const sized = sizedImageUrl(url, 640);
+  return sized === url ? undefined : `${sized} 640w, ${sizedImageUrl(url, 1200)} 1200w`;
+}
+
 const PRIVATE_IMAGE_MIME = { jpg: "image/jpeg", png: "image/png", webp: "image/webp" } as const;
 
 export function privateImageMime(

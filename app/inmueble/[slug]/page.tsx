@@ -14,6 +14,7 @@ import PropertyContactActions from "../../components/PropertyContactActions";
 import ListingViewBeacon from "../../components/ListingViewBeacon";
 import ShareListing from "../../components/ShareListing";
 import { TITULAR } from "../../lib/legal";
+import { sizedImageUrl } from "../../lib/property-image-source";
 
 type PageProps = { params: Promise<{ slug: string }> };
 
@@ -55,7 +56,7 @@ function RelatedListings({ property, items }: { property: Listing; items: Listin
     <ul>{items.map(item => {
       const image = primaryImage(item);
       return <li key={item.id}><Link href={`/inmueble/${item.slug}`}>
-        <span className={`property-related-photo${image ? "" : " empty"}`}>{image ? <img src={image.url} alt="" width={96} height={72} loading="lazy" decoding="async" /> : <span aria-hidden="true">{propertyIcon(item.type)}</span>}</span>
+        <span className={`property-related-photo${image ? "" : " empty"}`}>{image ? <img src={sizedImageUrl(image.url, 320)} alt="" width={96} height={72} loading="lazy" decoding="async" /> : <span aria-hidden="true">{propertyIcon(item.type)}</span>}</span>
         <span className="property-related-text"><b>{formatPrice(item.price, item.currency)}</b><span>{item.title}</span><small>{compactLocation(item)}</small></span>
       </Link></li>;
     })}</ul>
