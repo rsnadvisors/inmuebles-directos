@@ -12,10 +12,12 @@ returns text language sql stable security definer set search_path = '' as $fn$
     where p.id = p_property_id
       and p.status = 'published'
       and btrim(coalesce(pr.full_name, '')) <> ''
-      and pr.full_name !~ '[@0-9]'
+      -- Solo nombres de personas: letras, espacios, apóstrofo, punto o guion. Correos, apodos con cifras o
+      -- símbolos no se publican (la ficha muestra «Anunciante»).
+      and pr.full_name ~ '^[[:alpha:][:space:]''.-]+$'
   )
   -- Con 3 o más palabras, el primer apellido suele ser la penúltima («Ricardo Vicente Sancarranco Navarrete» → S.).
-  select left(initcap(lower(w[1])), 40)
+  select left(initcap(lower(w[1])), 20)
          || case when cardinality(w) > 1 then ' ' || upper(left(w[greatest(2, cardinality(w) - 1)], 1)) || '.' else '' end
   from n;
 $fn$;

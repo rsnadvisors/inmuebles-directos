@@ -44,6 +44,8 @@ describe("anunciante en la ficha", () => {
     expect(sql).toMatch(/p\.status = 'published'/);
     expect(sql).toMatch(/revoke all on function public\.listing_publisher_name\(uuid\) from public;/);
     expect(sql).not.toMatch(/pr\.(phone|role|avatar_url)/);
+    expect(sql).toMatch(/pr\.full_name ~ '\^\[\[:alpha:\]\[:space:\]''\.-\]\+\$'/);
+    expect(sql).toMatch(/left\(initcap\(lower\(w\[1\]\)\), 20\)/);
   });
 
   it("la política de privacidad declara el nombre abreviado como público", () => {
