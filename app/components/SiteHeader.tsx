@@ -8,11 +8,14 @@ import SignOutButton from "./SignOutButton";
 type Props = {
   query?: string;
   onQueryChange?: (value: string) => void;
+  /** Enter / «Buscar» del teclado: la página aplica la búsqueda y vacía el campo. */
+  onQuerySubmit?: () => void;
   mobileFilters?: boolean;
   onMobileFiltersChange?: (value: boolean) => void;
 };
 
-export default function SiteHeader({ query, onQueryChange, mobileFilters, onMobileFiltersChange }: Props) {
+export default function SiteHeader({ query, onQueryChange, onQuerySubmit, mobileFilters, onMobileFiltersChange }: Props) {
+  const searchRef = useRef<HTMLInputElement>(null);
   const [account, setAccount] = useState<{ signedIn: boolean; name: string } | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -58,7 +61,13 @@ export default function SiteHeader({ query, onQueryChange, mobileFilters, onMobi
   const close = () => setMenuOpen(false);
   return <header className={`geo-header ${onQueryChange ? "geo-header-search" : "geo-header-simple"}`}>
     <Link className="geo-logo" href="/" aria-label="Inmuebles Directos Perú, inicio">Inmuebles<span> Directos</span><small>Perú</small></Link>
-    {onQueryChange && <><label className="header-search"><span aria-hidden="true">⌕</span><input value={query ?? ""} onChange={event => onQueryChange(event.target.value)} placeholder="Buscar propiedad, ciudad o provincia" aria-label="Buscar propiedad, ciudad o provincia" /></label><button className="mobile-filter-toggle" type="button" aria-label="Abrir filtros" aria-expanded={!!mobileFilters} onClick={() => onMobileFiltersChange?.(!mobileFilters)}>☷</button></>}
+    {onQueryChange && <><form className="header-search" role="search" onSubmit={event => { event.preventDefault(); searchRef.current?.blur(); onQuerySubmit?.(); }}>
+      <span aria-hidden="true">⌕</span>
+      <input ref={searchRef} value={query ?? ""} onChange={event => onQueryChange(event.target.value)} placeholder="Buscar propiedad, ciudad o provincia"
+        aria-label="Buscar propiedad, ciudad o provincia" enterKeyHint="search" autoComplete="off" />
+      {query && <button type="button" className="header-search-clear" aria-label="Borrar búsqueda" title="Borrar"
+        onClick={() => { onQueryChange(""); searchRef.current?.focus(); }}>×</button>}
+    </form><button className="mobile-filter-toggle" type="button" aria-label="Abrir filtros" aria-expanded={!!mobileFilters} onClick={() => onMobileFiltersChange?.(!mobileFilters)}>☷</button></>}
     <nav className="geo-nav" aria-label="Navegación principal"><Link className="publish-cta" href={publishHref}>Publicar gratis</Link><Link href="/">Explorar mapa</Link>{account?.signedIn ? <Link href="/cuenta">{account.name}</Link> : <Link href="/login">Iniciar sesión</Link>}</nav>
     <div className="mobile-nav" ref={menuRef}><button ref={buttonRef} className="mobile-menu" type="button" aria-label="Abrir menú" aria-expanded={menuOpen} aria-controls="mobile-site-menu" onClick={() => setMenuOpen(open => !open)}>☰</button>
       {menuOpen && <nav id="mobile-site-menu" className="mobile-menu-panel" aria-label="Menú móvil"><Link href="/" onClick={close}>Inicio</Link><Link href={publishHref} onClick={close}>Publicar gratis</Link>{account?.signedIn ? <><Link href="/cuenta" onClick={close}>Mi cuenta</Link><Link href="/mis-propiedades" onClick={close}>Mis propiedades</Link><SignOutButton /></> : <><Link href="/login" onClick={close}>Iniciar sesión</Link><Link href="/registro" onClick={close}>Crear cuenta</Link></>}</nav>}
