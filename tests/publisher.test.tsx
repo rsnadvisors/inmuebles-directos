@@ -48,6 +48,15 @@ describe("anunciante en la ficha", () => {
     expect(sql).toMatch(/left\(initcap\(lower\(w\[1\]\)\), 20\)/);
   });
 
+  it("la versión vigente no corta el primer nombre y el nombre largo hace salto de línea", () => {
+    const sql = readFileSync("supabase/migrations/20261121130000_listing_publisher_name_full_word.sql", "utf8");
+    expect(sql).toMatch(/left\(initcap\(lower\(w\[1\]\)\), 60\)/);
+    expect(sql).toMatch(/p\.status = 'published'/);
+    expect(sql).toMatch(/pr\.full_name ~ '\^\[\[:alpha:\]\[:space:\]''\.-\]\+\$'/);
+    expect(sql).not.toMatch(/pr\.(phone|role|avatar_url)/);
+    expect(readFileSync("app/globals.css", "utf8")).toMatch(/\.publisher-name\{[^}]*overflow-wrap:anywhere/);
+  });
+
   it("la política de privacidad declara el nombre abreviado como público", () => {
     expect(readFileSync("app/privacidad/page.tsx", "utf8")).toMatch(/nombre abreviado/);
   });
