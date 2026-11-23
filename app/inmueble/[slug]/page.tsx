@@ -14,7 +14,7 @@ import ListingViewBeacon from "../../components/ListingViewBeacon";
 import ShareListing from "../../components/ShareListing";
 import { TITULAR } from "../../lib/legal";
 import ListingSuggestions from "../../components/ListingSuggestions";
-import { getListingPublicState, removedListingTarget } from "../../lib/listing-state";
+import { getListingPublicState, legacyListingTarget, looksLikeListingSlug, removedListingTarget, type ListingPublicState } from "../../lib/listing-state";
 import ClosedListing, { closedListingTitle } from "./ClosedListing";
 
 type PageProps = { params: Promise<{ slug: string }> };
@@ -56,14 +56,29 @@ function RelatedListings({ property, items }: { property: Listing; items: Listin
     allHref={landingPath(op, city)} allLabel={`Ver todos los inmuebles ${label} en ${city}`} />;
 }
 
+/**
+ * URL de un anuncio que no está publicado. Vendido, alquilado o no disponible → se devuelve su estado para la
+ * página de cierre. Eliminado (con lápida o cerrado hace más de 6 meses) → redirección permanente a su zona.
+ * Sin ningún rastro en la base pero con formato de anuncio del portal (borrado antes de las lápidas) → la zona se
+ * deduce del texto de la URL. Cualquier otra dirección → 404. Si no se puede leer el inventario, error (500) en
+ * lugar de una redirección permanente equivocada.
+ */
+async function missingListing(slug: string): Promise<ListingPublicState> {
+  const state = await getListingPublicState(slug);
+  if (state && state.state !== "removed") return state;
+  if (!state && !looksLikeListingSlug(slug)) notFound();
+  const inventory = await readHomeListings();
+  if (!inventory) throw new Error("No se pudieron leer los anuncios publicados");
+  permanentRedirect(state ? removedListingTarget(state, inventory) : legacyListingTarget(slug, inventory) ?? "/");
+}
+
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const { slug } = await params;
   const property = await getPublishedListing(slug);
   if (!property) {
     // Vendido, alquilado o no disponible: página propia fuera del índice (sus enlaces sí se siguen). Retirado: la
     // página hace la redirección permanente; sin estado público, 404.
-    const state = await getListingPublicState(slug);
-    if (!state) notFound();
+    const state = await missingListing(slug);
     return { title: `${closedListingTitle(state)} | Inmuebles Directos`, robots: { index: false, follow: true } };
   }
   const canonical = `/inmueble/${encodeURIComponent(property.slug || slug)}`;
@@ -88,12 +103,8 @@ export default async function PropertyPage({ params }: PageProps) {
   const { slug } = await params;
   const property = await getPublishedListing(slug);
   if (!property) {
-    const state = await getListingPublicState(slug);
-    if (!state) notFound();
-    const inventory = await readHomeListings();
-    // Eliminado (o cerrado hace más de 6 meses): redirección permanente a su zona, que conserva la autoridad del enlace.
-    if (state.state === "removed") permanentRedirect(removedListingTarget(state, inventory));
-    return <ClosedListing state={state} inventory={inventory} />;
+    const state = await missingListing(slug);
+    return <ClosedListing state={state} inventory={await readHomeListings()} />;
   }
   const date = publishedDate(property.publishedAt);
   // Nombre del anunciante y anuncios de la zona en paralelo: la ficha no espera dos consultas seguidas.
