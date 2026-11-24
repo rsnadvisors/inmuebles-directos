@@ -1,0 +1,103 @@
+{
+  "$schema": "https://design-tokens.github.io/community-group/format/",
+  "$description": "Tokens de marca de Inmuebles Directos. Fuente única para diseño y desarrollo. Ver BRAND_MANUAL.md. «status: en-uso» = el valor ya aparece en app/globals.css (como variable o como color literal); «status: nuevo» = definido en este manual, pendiente de llevar a la web. La columna «css» es el nombre de variable recomendado.",
+  "color": {
+    "brand": {
+      "teal":       { "$type": "color", "$value": "#087f70", "css": "--teal",       "status": "en-uso", "rgb": "8 127 112",   "cmyk": "94 0 12 50", "uso": "Color de marca: botones principales, enlaces, precios, «Inmuebles» del logotipo." },
+      "teal-dark":  { "$type": "color", "$value": "#075f56", "css": "--teal-dark",  "status": "en-uso", "rgb": "7 95 86",     "cmyk": "93 0 9 63",  "uso": "Hover y estado activo del teal; texto teal sobre fondos verde claro." },
+      "forest":     { "$type": "color", "$value": "#073d37", "css": "--forest",     "status": "nuevo",  "rgb": "7 61 55",     "cmyk": "89 0 10 76", "uso": "Fondo oscuro de marca (franjas, piezas sociales, isotipo en negativo). Hoy existe como literal en .live-bar." },
+      "mint":       { "$type": "color", "$value": "#35d2aa", "css": "--mint",       "status": "nuevo",  "rgb": "53 210 170",  "cmyk": "75 0 19 18", "uso": "Acento SOLO sobre forest (6,32:1). Nunca como texto sobre blanco (1,92:1)." },
+      "teal-tint":  { "$type": "color", "$value": "#e3f2ee", "css": "--teal-tint",  "status": "en-uso", "rgb": "227 242 238", "cmyk": "6 0 2 5",    "uso": "Fondo de chips y contadores. Texto encima: teal-dark (6,55:1), no teal (4,25:1)." }
+    },
+    "neutral": {
+      "ink":        { "$type": "color", "$value": "#15232d", "css": "--ink",        "status": "en-uso", "rgb": "21 35 45",    "cmyk": "53 22 0 82", "uso": "Texto principal y titulares; «Directos» del logotipo." },
+      "slate":      { "$type": "color", "$value": "#52636a", "css": "--slate",      "status": "nuevo",  "rgb": "82 99 106",   "cmyk": "23 7 0 58",  "uso": "Texto de controles y navegación (hoy literal #52636a)." },
+      "muted":      { "$type": "color", "$value": "#64727d", "css": "--muted",      "status": "en-uso", "rgb": "100 114 125", "cmyk": "20 9 0 51",  "uso": "Texto secundario: ubicación, fechas, ayudas. Mínimo 12 px." },
+      "border":     { "$type": "color", "$value": "#d7e2df", "css": "--border",     "status": "nuevo",  "rgb": "215 226 223", "cmyk": "5 0 1 11",   "uso": "Borde de controles (inputs, chips, botones secundarios)." },
+      "line":       { "$type": "color", "$value": "#e1e8e6", "css": "--line",       "status": "en-uso", "rgb": "225 232 230", "cmyk": "3 0 1 9",    "uso": "Separadores y borde de tarjetas." },
+      "soft":       { "$type": "color", "$value": "#f5f8f7", "css": "--soft",       "status": "en-uso", "rgb": "245 248 247", "cmyk": "1 0 0 3",    "uso": "Superficies secundarias." },
+      "canvas":     { "$type": "color", "$value": "#f7faf9", "css": "--canvas",     "status": "nuevo",  "rgb": "247 250 249", "cmyk": "1 0 0 2",    "uso": "Fondo general de página (hoy literal en body)." },
+      "white":      { "$type": "color", "$value": "#ffffff", "css": "--white",      "status": "en-uso", "rgb": "255 255 255", "cmyk": "0 0 0 0",    "uso": "Tarjetas, encabezado, pines del mapa." },
+      "map-land":   { "$type": "color", "$value": "#efebe4", "css": "--map-land",   "status": "en-uso", "rgb": "239 235 228", "cmyk": "0 2 5 6",    "uso": "Fondo del panel del mapa mientras cargan las teselas." }
+    },
+    "semantic": {
+      "success":    { "$type": "color", "$value": "#127a4b", "css": "--success",    "status": "nuevo",  "rgb": "18 122 75",   "cmyk": "85 0 39 52", "uso": "Confirmaciones («Cambios guardados»). Sobre blanco 5,37:1." },
+      "success-bg": { "$type": "color", "$value": "#e3f4ea", "css": "--success-bg", "status": "nuevo",  "rgb": "227 244 234", "cmyk": "7 0 4 4",    "uso": "Fondo de avisos de éxito (texto success: 4,70:1)." },
+      "check":      { "$type": "color", "$value": "#16a34a", "css": "--check",      "status": "en-uso", "rgb": "22 163 74",   "cmyk": "87 0 55 36", "uso": "Solo icono de verificación (no texto): 3,30:1 sobre blanco, válido para gráficos." },
+      "warning":    { "$type": "color", "$value": "#8a5a00", "css": "--warning",    "status": "en-uso", "rgb": "138 90 0",    "cmyk": "0 35 100 46","uso": "Texto de alerta y etiqueta «Reservado» (5,31:1 sobre warning-bg)." },
+      "warning-bg": { "$type": "color", "$value": "#fff1d6", "css": "--warning-bg", "status": "en-uso", "rgb": "255 241 214", "cmyk": "0 5 16 0",   "uso": "Fondo de alertas y de la etiqueta «Reservado»." },
+      "error":      { "$type": "color", "$value": "#b42318", "css": "--error",      "status": "nuevo",  "rgb": "180 35 24",   "cmyk": "0 81 87 29", "uso": "Errores de formulario y acciones destructivas (6,57:1 sobre blanco)." },
+      "error-bg":   { "$type": "color", "$value": "#fef3f2", "css": "--error-bg",   "status": "nuevo",  "rgb": "254 243 242", "cmyk": "0 4 5 0",    "uso": "Fondo de mensajes de error (texto error: 6,05:1)." },
+      "focus":      { "$type": "color", "$value": "#087f70", "css": "--focus",      "status": "nuevo",  "rgb": "8 127 112",   "cmyk": "94 0 12 50", "uso": "Anillo de foco de teclado. Reemplaza a #55c4b2 (2,12:1, no cumple 3:1)." }
+    },
+    "label": {
+      "venta":      { "fg": "#ffffff", "bg": "#087f70", "contrast": 4.91,  "status": "nuevo",  "texto": "Venta" },
+      "alquiler":   { "fg": "#ffffff", "bg": "#15232d", "contrast": 16.03, "status": "nuevo",  "texto": "Alquiler" },
+      "reservado":  { "fg": "#8a5a00", "bg": "#fff1d6", "contrast": 5.31,  "status": "en-uso", "texto": "Reservado" },
+      "destacado":  { "fg": "#35d2aa", "bg": "#073d37", "contrast": 6.32,  "status": "nuevo",  "texto": "Destacado" },
+      "vendido":    { "fg": "#075f56", "bg": "#e3f2ee", "contrast": 6.55,  "status": "nuevo",  "texto": "Vendido / Alquilado", "nota": "Hoy usa teal sobre teal-tint (4,25:1): corregir a teal-dark." },
+      "no-disponible": { "fg": "#52636a", "bg": "#eef2f1", "contrast": 5.55, "status": "en-uso", "texto": "No disponible" }
+    }
+  },
+  "font": {
+    "family": {
+      "ui":   { "$type": "fontFamily", "$value": ["Plus Jakarta Sans", "Arial", "sans-serif"], "css": "--ui", "carga": "next/font/google, variable 200–800", "status": "en-uso" },
+      "meta": { "$type": "fontFamily", "$value": ["DM Mono", "monospace"], "css": "--meta", "carga": "next/font/google, pesos 400 y 500", "status": "en-uso" }
+    },
+    "scale": {
+      "display": { "size": "clamp(30px, 4vw, 48px)", "weight": 800, "lineHeight": 1.08, "tracking": "-0.045em", "uso": "H1 de ficha y de páginas de zona" },
+      "h2":      { "size": "clamp(22px, 3vw, 28px)", "weight": 800, "lineHeight": 1.15, "tracking": "-0.03em" },
+      "h3":      { "size": "20px", "weight": 800, "lineHeight": 1.2,  "tracking": "-0.02em", "uso": "Títulos de sección de la ficha" },
+      "h4":      { "size": "17px", "weight": 700, "lineHeight": 1.3,  "tracking": "-0.01em" },
+      "h5":      { "size": "15px", "weight": 700, "lineHeight": 1.35, "tracking": "0" },
+      "h6":      { "size": "13px", "weight": 700, "lineHeight": 1.4,  "tracking": "0" },
+      "price-xl":{ "size": "28px", "weight": 800, "lineHeight": 1.1,  "tracking": "-0.02em", "uso": "Precio en la ficha" },
+      "price":   { "size": "16–19px", "weight": 800, "lineHeight": 1.2, "uso": "Precio en tarjetas" },
+      "body-lg": { "size": "18px", "weight": 400, "lineHeight": 1.55, "uso": "Introducciones" },
+      "body":    { "size": "16px", "weight": 400, "lineHeight": 1.65, "uso": "Descripción del inmueble" },
+      "body-sm": { "size": "14px", "weight": 400, "lineHeight": 1.55 },
+      "ui":      { "size": "13px", "weight": 700, "lineHeight": 1.3,  "uso": "Botones, navegación, chips" },
+      "caption": { "size": "12px", "weight": 500, "lineHeight": 1.4,  "uso": "Ubicación, ayudas. Mínimo absoluto para texto de lectura." },
+      "label":   { "family": "meta", "size": "11px", "weight": 500, "tracking": "0.06em", "transform": "uppercase", "uso": "Etiquetas tipo «COMPRAR · CASAS», contadores" }
+    }
+  },
+  "radius": {
+    "xs": { "$value": "8px",   "uso": "Miniaturas, botones compactos" },
+    "sm": { "$value": "12px",  "uso": "Inputs, buscador, atributos" },
+    "md": { "$value": "16px",  "uso": "Tarjetas de listado y panel lateral" },
+    "lg": { "$value": "18px",  "uso": "Secciones de la ficha" },
+    "xl": { "$value": "22px",  "uso": "Galería principal, formularios grandes" },
+    "pill": { "$value": "999px", "uso": "Botones principales, chips, pines del mapa, etiquetas" },
+    "icon": { "$value": "21.875%", "uso": "Esquina del isotipo (14 de 64)" }
+  },
+  "shadow": {
+    "card":   { "$value": "0 5px 18px rgba(11, 118, 110, 0.09)", "uso": "Tarjeta en hover/seleccionada" },
+    "raised": { "$value": "0 8px 30px rgba(23, 59, 53, 0.07)", "uso": "Formularios y paneles elevados" },
+    "pin":    { "$value": "0 5px 16px rgba(23, 59, 53, 0.16)", "uso": "Pines de precio en el mapa" },
+    "float":  { "$value": "0 3px 14px rgba(0, 0, 0, 0.2)", "uso": "Controles flotantes sobre el mapa" },
+    "drawer": { "$value": "0 14px 45px rgba(23, 59, 53, 0.25)", "uso": "Panel de detalle sobre el mapa" }
+  },
+  "space": {
+    "base": "4px",
+    "scale": [4, 8, 12, 16, 20, 24, 32, 48, 72],
+    "gutter-mobile": "16px",
+    "gutter-desktop": "24–32px",
+    "container": "1180px",
+    "touch-target": "44px"
+  },
+  "icon": {
+    "set": "Lucide (recomendado)",
+    "grid": "24px",
+    "stroke": "1.75px",
+    "caps": "round",
+    "joins": "round",
+    "status": "nuevo",
+    "amenidades": { "area": "maximize-2", "dormitorios": "bed-double", "banos": "bath", "estacionamiento": "car", "ubicacion": "map-pin", "pisos": "layers" }
+  },
+  "logo": {
+    "wordmark": { "texto": "Inmuebles Directos", "Inmuebles": "#087f70", "Directos": "#15232d", "font": "Plus Jakarta Sans 800", "tracking": "-0.06em", "descriptor": "PERÚ · DM Mono 600 · 0.12em · mayúsculas · #64727d" },
+    "isotipo": { "archivo": "app/icon.svg", "variantes": "public/brand/isotipo*.svg", "concepto": "Monograma «ID»: la I en teal y la D en tinta sobre cuadrado blanco con esquinas de 14/64" },
+    "clearspace": "1 x = altura de la letra «I» del logotipo (en el isotipo: 1/4 del lado)",
+    "minimo": { "wordmark-digital": "120px de ancho", "wordmark-impreso": "30mm", "isotipo-digital": "16px (favicon) · 24px en interfaz", "isotipo-impreso": "8mm" }
+  }
+}
